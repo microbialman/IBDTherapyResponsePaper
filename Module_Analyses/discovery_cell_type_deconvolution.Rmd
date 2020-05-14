@@ -1,0 +1,233 @@
+---
+title: "Discovery Cohort Cell Type Deconvolution"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(here)
+source(here("Scripts","BioFunk.R"))
+library(xCell)
+library(tidyverse)
+library(WGCNA)
+library(igraph)
+library(cowplot)
+library(GGally)
+library(intergraph)
+library(RColorBrewer)
+library(piano)
+
+theme_set(theme_cowplot())
+
+```
+
+## Cell type deconvolution
+
+xCell is used to estimate relative cell type abundances for each sample from the TPM normalised RNA-seq data. Heatmap shows cell types observed in at least 25% of samples.
+
+```{r fig.width=15, fig.height=10}
+##Generate the Cell Type Scores
+#load in the RNAseq
+rnadat=data.frame(readRDS(here::here("Data","Generated","discovery_filtered_tpm.Rds")))
+#rename the cols
+namemap=read.csv(here::here("Data","Input","discovery_tpm_counts.csv"),header=T) 
+namemap=namemap[,c(1,2)]
+namesvect=namemap$gene_name
+names(namesvect)=namemap$gene_id
+colnames(rnadat)=namesvect[colnames(rnadat)]
+#merge dupliacate gene names
+rnadat = mergDupCol(rnadat,FALSE)
+rnadat=(rowNamer(rnadat)
+#Calculate the cell type scores
+if(!file.exists(here("Data","Generated","discovery_xCell_Scores.txt"))){
+xcel=xCellAnalysis(t(rnadat),rnaseq = T, file.name = here("Data","Generated","discovery_xCell_Scores.txt"))}
+
+#
+xcel=read_delim(here("Data","Generated","discovery_xCell_Scores.txt"),"\t") %>% t()
+meta=read_delim(here("Data","Generated","metadata.csv"),",") %>% filter(`sample_ID (patient)`%in%MEs$X1)
+colnames(xcel)=xcel[1,]
+xcel=xcel[-1,]
+xcel = xcel[match(meta$`sample_ID (patient)`,rownames(xcel)),]
+xcel = apply(xcel,2,as.numeric)
+MEs = MEs %>% arrange(match(MEs$X1,meta$`sample_ID (patient)`))
+bardat = data.frame(NANCY=meta$NANCYscore, IBD=ifelse(meta$disease=="A",0,1), orange=MEs$orange, paleturquoise=MEs$paleturquoise)
+rownames(xcel)=rownames(bardat)
+
+filtxcel=xcel[,-which(colSums(xcel==0)>(nrow(xcel)*0.75))]
+
+library(pheatmap)
+pheatmap(filtxcel,annotation_row = bardat)
+
+#HEATMAP CELL TYPES VS MEs
+suppressPackageStartupMessages(library(WGCNA))
+cellMECor =cor(filtxcel, MEs, use = "p")
+corPvalue =corPvalueStudent(as.matrix(cellMECor), nrow(filtxcel))
+padj=matrix(p.adjust(corPvalue,method="fdr"),ncol=39,byrow = F)
+colnames(padj)=colnames(MEs)
+rownames(padj)=colnames(filtxcel)
+colorer=colorRampPalette(rev(brewer.pal(11,"RdBu")))
+P=ifelse(padj<0.05,1,0)
+simpHeat(t(cellMECor),t(P),colorer(11))+scale_color_manual(values=c("black",NA),labels=c("FDR<0.05",""),name="Significance")
+ggsave("/gfs/devel/majackson/BRC_WGCNA/Unbiased_Analysis/modules_by_cell_types_heatmap.pdf",width = 15,height = 10)
+
+
+```
+
+## Cell types vs disease
+
+```{r results="asis", fig.width=15, fig.height=10}
+library(knitr)
+ps=c()
+filtxcel=data.frame(filtxcel)
+for(i in 1:ncol(filtxcel)){
+  wt=wilcox.test(filtxcel[,i]~bardat$IBD)
+  ps=c(ps,wt$p.value)
+}
+ad=p.adjust(ps,method="fdr")
+keep=colnames(filtxcel)[order(ad)[1:10]]
+
+cat("*Cell types sig. different in IBD vs CRC*")
+df=data.frame(Cell_Type=colnames(filtxcel),p=ps,adj_p=ad)
+df=df[order(df$adj_p),]
+kable(df)
+
+#barplots of neutrophils and tregs and iDCs
+ibd_by_ct = filtxcel %>% as_tibble() %>% select(keep) %>% add_column(IBD=bardat$IBD) %>% gather("Cell_Type","xCell_Enrichment_Score",-IBD) %>%
+  mutate(Cell_Type=fct_relevel(Cell_Type,keep))
+ibd_by_ct %>% ggplot(aes(x=as.factor(IBD),y=xCell_Enrichment_Score))+geom_boxplot()+geom_point()+facet_wrap(.~Cell_Type,scales = "free_y", nrow=2)+stat_compare_means()
+```
+
+## Cell type abundances vs module eigengenes
+
+```{r results="asis", fig.width=15, fig.height=10}
+mods=bardat %>% select(NANCY,orange,paleturquoise,grey60)
+pcols=c("red","orange","paleturquoise","grey60")
+for(i in 1:ncol(mods)){
+  ps=c()
+  for(j in 1:ncol(filtxcel)){
+    ct=cor.test(filtxcel[,j],mods[,i])
+    ps=c(ps,ct$p.value)
+  }
+  ad=p.adjust(ps,method="fdr")
+  df=data.frame(Cell_Type=colnames(filtxcel),p=ps,adj_p=ad)
+  df=df[order(df$adj_p),]
+  print(kable(df,caption=colnames(mods)[i]))
+  
+  keep=df$Cell_Type[1:10]
+  
+  cat("\n")
+  
+  var_by_ct = filtxcel %>% as_tibble() %>% select(keep) %>% add_column(var=mods[,i]) %>% gather("Cell_Type","xCell_Enrichment_Score",-var)
+  var_by_ct$Cell_Type=factor(var_by_ct$Cell_Type,levels = keep)
+  p=var_by_ct %>% ggplot(aes(x=var,y=xCell_Enrichment_Score))+geom_point()+geom_smooth(method="lm",se = F,col=pcols[i])+facet_wrap(.~Cell_Type,scales = "free_y", nrow=2)+stat_cor()+ggtitle(colnames(mod)[i])+xlab(colnames(mods)[i])
+  print(p)
+  
+}
+
+```
+
+```{r}
+
+theme_set(theme_cowplot())
+
+#tissue definitions
+defs <- rbind(
+  c("M24","Epithelial"),
+  c("M23","Epithelial"),
+  c("M22","Epithelial"),
+  c("M21","Epithelial"),
+  c("M20","Epithelial"),
+  c("M16","Epithelial"),
+  c("M18","Epithelial"),
+  c("M17","Epithelial"),
+  c("M19","Epithelial"),
+  c("M4","Vascular/Fibroblast"),
+  c("M1","Vascular/Fibroblast"),
+  c("M2","Vascular/Fibroblast"),
+  c("M10","Vascular/Fibroblast"),
+  c("M3","Vascular/Fibroblast"),
+  c("M8","Vascular/Fibroblast"),
+  c("M9","Vascular/Fibroblast"),
+  c("M7","Neutrophil"),
+  c("M5","Neutrophil")
+)
+defs <- data.frame(defs)
+colnames(defs) <- c("Module","Group")
+
+groupcols <- cbind(c("Epithelial","Vascular/Fibroblast","Neutrophil"),brewer.pal(3,"Dark2"))
+
+#import the module eigengenes
+eigen <- read.table("/gfs/devel/majackson/BRC_WGCNA/Unbiased_Analysis/MEs.csv",sep=",",header=T,row.names=1)
+#rename to module numbers
+modnums <- read.table("/gfs/devel/majackson/BRC_WGCNA/module_number_key.csv",sep=",")
+modnums[,1] <- paste0("ME",modnums[,1])
+colnames(eigen) <- modnums[match(colnames(eigen),modnums[,1]),2]
+
+#claculate cor and ps of cors
+cors <- cor(eigen)
+cors[lower.tri(cors,diag = T)] <- NA
+longcors <- data.frame(cors) %>% rownames_to_column("Row") %>% gather("Col","Cor",-Row) %>% filter(!is.na(Cor)) %>% add_column(p=corPvalueStudent(.$Cor,nrow(eigen))) %>%
+  add_column(padj=p.adjust(.$p,"fdr")) %>% add_column(Sig=ifelse(.$padj<0.01,1,0))
+
+#generate a network plot
+edges <- longcors %>% filter(Sig==1) %>% select(Row,Col,Cor)
+g <- make_undirected_graph(rbind(edges$Row,edges$Col)) %>% set_edge_attr("weight",value=edges$Cor) %>%
+  set_edge_attr("color", value=ifelse(edges$Cor>0,"#B21A06","#075B6E")) %>% set_edge_attr("width",value=(abs(edges$Cor)^5)*10)
+#just get vertices connected to M4 and M5
+m45 <- c("M4","M5")
+neigh <- edges %>% filter(Row%in%m45|Col%in%m45)
+keep <- unique(c(neigh$Col,neigh$Row))
+rem <- V(g)
+rem <- rem[!names(rem)%in%keep]
+g <- delete_vertices(g,rem)
+l <- layout_as_star(g, center="M4")
+vcols <- c()
+for(i in names(V(g))){
+  if(i%in%defs$Module){
+    vcols <- c(vcols,groupcols[which(groupcols[,1]==defs$Group[defs$Module==i]),2])
+  }else{
+    vcols <- c(vcols,"grey")
+  }
+}
+g <- g %>% set_vertex_attr("color",value=vcols) %>% set_vertex_attr("degree",value=degree(g))
+netplot <- ggnet2(g, mode=l, edge.size = E(g)$width, edge.color = E(g)$color, node.color = V(g)$color, node.size=18,
+       node.label = names(V(g)), label.color = "white", edge.alpha = 0.7, label.size = 6)+
+  theme(axis.line = element_blank())+guides(size=F)
+
+
+#get the correlations with xcell scores
+col <- colorRampPalette(rev(brewer.pal(11,"RdBu")))
+xcell <- t(read.table("/gfs/devel/majackson/BRC_WGCNA/Unbiased_Analysis/xCELL_Scores.txt",sep="\t",header=T,row.names=1,check.names = F))
+xcell <- xcell[,apply(xcell,2,sd)!=0]
+filteigen <- eigen[,colnames(eigen)%in%names(V(g))]
+xcellcors <- data.frame(cor(eigen,xcell),check.names = F) %>% rownames_to_column("Module") %>% gather("CellType","Cor", -Module) %>% add_column(p=corPvalueStudent(.$Cor,nrow(eigen))) %>% 
+  add_column(padj=p.adjust(.$p,"fdr")) %>% add_column(Sig=ifelse(.$padj<0.05,1,0))
+modclust <- cor(filteigen,xcell) %>% dist() %>% hclust() 
+cellclust <- t(cor(filteigen,xcell)) %>% dist() %>% hclust() 
+xcellcors <- xcellcors %>% filter(Module%in%colnames(filteigen)) %>% mutate(Module=factor(Module,levels=modclust$labels[modclust$order]),CellType=factor(CellType,levels=cellclust$labels[cellclust$order]))
+keepcells <- c("Epithelial cells","Keratinocytes","Pericytes","mv Endothelial cells",
+               "Fibroblasts","Endothelial cells","ly Endothelial cells","Basophils","Neutrophils")
+keepcelltiss <- cbind(keepcells,c("Epithelial","Epithelial","Vascular/Fibroblast","Vascular/Fibroblast","Vascular/Fibroblast","Vascular/Fibroblast","Vascular/Fibroblast","Neutrophil","Neutrophil"))
+filtxcellcors <- xcellcors %>% filter(CellType%in%keepcells) %>% mutate(CellType=droplevels(CellType),Module=droplevels(Module))
+xcols <- groupcols[match(keepcelltiss[match(levels(filtxcellcors$CellType),keepcelltiss[,1]),2],groupcols[,1]),2]
+ycols <- c()
+for(i in levels(filtxcellcors$Module)){
+  if(i%in%defs$Module){
+    ycols <- c(ycols,groupcols[which(groupcols[,1]==defs$Group[defs$Module==i]),2])
+  }else{
+    ycols <- c(ycols,"grey")
+  }
+}
+heatplot <- filtxcellcors %>% ggplot(aes(x=CellType,y=Module,fill=Cor))+geom_tile()+
+  scale_fill_gradientn(colors=col(11))+ theme(axis.title = element_blank(),
+                                                 axis.line = element_blank(),
+                                                 axis.ticks = element_blank(),
+                                                 axis.text.x = element_text(angle = 90,hjust=1,vjust=0.5,colour =xcols),
+                                                axis.text.y = element_text(color=ycols))
+
+pdf("/gfs/devel/majackson/BRC_WGCNA/Additional_Plots/module_network_with_tissue_definitions.pdf",width=10, height=7)
+plot_grid(heatplot,netplot,ncol=2, rel_widths = c(0.35,0.65))
+dev.off()
+```

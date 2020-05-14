@@ -1,0 +1,392 @@
+---
+title: "Discovery Cohort WGCNA Analysis"
+editor_options: null
+output:
+  html_document: default
+  pdf_document: default
+chunk_output_type: console
+---
+
+# Data QC
+
+```{r echo=FALSE}
+#library here lets things be relative to this repo
+library(here)
+#load BioFunk helper script
+source(here("Scripts","BioFunk.R"))
+
+#load other libraries
+library(pheatmap)
+library(biomaRt,quietly = T)
+library(knitr,quietly = T)
+#load WGCNA
+suppressPackageStartupMessages(library(WGCNA))
+options(stringsAsFactors = FALSE)
+allowWGCNAThreads(nThreads = 20)
+#set seed to make reproducible
+set.seed(666)
+
+theme_set(theme_cowplot())
+
+#load in tpm counts
+tpmcounts=read.csv(here("Data","Input","discovery_tpm_counts.csv"))
+
+#set rownames to gene_id and remove non-count columns (columns 4 onwards)
+tpmformat=tpmcounts[,4:ncol(tpmcounts)]
+rownames(tpmformat)=tpmcounts$gene_id
+
+#rename samples to numbers
+sampnums=unlist(lapply(strsplit(colnames(tpmformat),"_"),"[[",5))
+colnames(tpmformat)=sampnums
+
+#filter so that genes are non-zero in at least 50% of samples
+tpmfilt=zeroFilt(tpmformat,0.5)
+
+#log and transpose
+tpm=t(log(tpmfilt+1))
+
+```
+
+## Genes
+
+TPM expression data loaded contains **`r ncol(tpmcounts)`** samples and **`r nrow(tpmcounts)`** genes.
+This was filtered to only retain genes observed in at least 50% of samples, resulting in **`r ncol(tpm)`** genes.
+TPM counts were then log transformed *(log(x+1))* for further analyses.
+
+```{r echo=F}
+#remove samples ommited from DE analysis due to failing QC
+samples2remove=read.csv(here("Data","Input","failed_samples.csv"))
+tpm=tpm[!rownames(tpm)%in%samples2remove[,1],]
+
+```
+
+## Samples
+
+Removed samples flagged for omission after failing QC in DE analysis, data now contains **`r nrow(tpm)`** samples.
+Heirarchical clustering plot to check for outliers and metadata associations.
+
+```{r,fig.width=10,fig.height=4,echo=FALSE}
+traitData = read.csv(here("Data","Input","discovery_metadata.csv"),stringsAsFactors = T)
+#subset metadata to remaning samples and put in matching order
+traitData=traitData[match(rownames(tpm),traitData$sample_ID..patient.),]
+
+#reformat disease data
+traitData$Disease.CRC=as.factor(ifelse(traitData$disease=="A",1,0))
+traitData$Disease.UC=as.factor(ifelse(traitData$disease=="B",1,0))
+traitData$Disease.CD=as.factor(ifelse(traitData$disease=="C",1,0))
+traitData$Combined=as.factor(ifelse(traitData$disease=="B"|traitData$disease=="C",1,0))
+#remove unused columns
+traitData=data.frame(lapply(traitData,as.character))
+traitData=traitData[,-c(1,3,4)]
+traitData[traitData=="A"]=0
+traitData[traitData=="B"]=1
+traitData[traitData=="Y"]=1
+traitData=data.frame(lapply(traitData,as.factor))
+rownames(traitData)=rownames(tpm)
+continuous=c(1,3,6,8)
+for(i in continuous){
+  traitData[,i]=as.numeric(as.character(traitData[,i]))
+}
+
+#plot a dendrogram with the metadata as color bars
+metaDend(tpm,traitData,10,1/3,102,4)
+
+```
+
+No obvious outliers, reasonable clustering of control and IBD samples.
+
+# WGCNA
+
+## Define co-expression modules
+
+Find a soft-threshold power to define a network between the genes. Using signed weights to define the network.
+
+```{r, warning=FALSE,fig.width=10,cache=TRUE,echo=FALSE}
+# Choose a set of soft-thresholding powers
+powers = c(c(1:10), seq(from = 12, to=20, by=2))
+# Call the network topology analysis function, uses Pearson correlation as default
+sft = pickSoftThreshold(tpm, powerVector = powers, verbose = 5, networkType = "signed")
+# Plot the results:
+par(mfrow = c(1,2));
+# Scale-free topology fit index as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+main = paste("Scale independence"))
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+labels=powers,cex=0.9,col="red")
+# this line corresponds to using an R^2 cut-off of h (we want our fit to be above this)
+abline(h=0.8,col="red")
+# Mean network connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=0.9,col="red")
+```
+
+Use a soft-thresholding power of **9** to generate an adjaceny matrix of the network this threshold produces.
+Then generate a topological overlap matrix from the adjacency matrix using a block-wise approach.
+
+```{r echo=FALSE }
+if(file.exists(here("Data","Generated","bwnet.Rds"))){
+  bwnet=readRDS(here("Data","Generated","bwnet.Rds"))
+}else{
+#write out the filtered TPM table
+saveRDS(tpm,here("Data","Generated","discovery_filtered_tpm.Rds"))
+#use the blockwise method to handle the large number of genes
+bwnet = blockwiseModules(tpm, maxBlockSize = 30000, power = 9, TOMType = "signed", minModuleSize = 30,
+reassignThreshold = 0, mergeCutHeight = 0.1, numericLabels = TRUE, saveTOMs = TRUE,
+saveTOMFileBase = "Data/Generated/TOM", verbose = 3)
+#save the bwnet object as it is resource heavy to make
+saveRDS(bwnet,here("Data","Generated","bwnet.Rds"))
+}
+# Plot the dendrograms
+bwModuleColors = labels2colors(bwnet$colors)
+par(mfrow = c(length(bwnet$dendrograms),1))
+pdend=function(net,block,ncols){
+plotDendroAndColors(net$dendrograms[[block]], ncols[net$blockGenes[[block]]],
+"Module colors", main = paste0("Gene dendrogram and module colors in block ",block),
+dendroLabels = FALSE, hang = 0.03,
+addGuide = TRUE, guideHang = 0.05)}
+for(i in c(1:length(bwnet$dendrograms))){
+pdend(bwnet,i,bwModuleColors)}
+
+```
+
+Look at correlations between the module eigengenes.
+
+```{r fig.height=5,fig.width=10,echo=FALSE}
+# Calculate eigengenes
+MEList = moduleEigengenes(tpm, colors = bwModuleColors, excludeGrey = TRUE,)
+MEs = MEList$eigengenes
+
+#correlation between the modules
+# Calculate dissimilarity of module eigengenes
+MEDiss = 1-cor(MEs);
+# Cluster module eigengenes
+METree = hclust(as.dist(MEDiss), method = "average");
+# Plot the result
+ggdendrogram(METree,rotate = F)
+
+```
+
+After filtering a total of **`r length(which(bwnet$goodGenes==TRUE))`** genes were included in module identification.
+These were clustered into modules by splitting data into **`r length(bwnet$dendrograms)`** blocks.
+A total of **`r length(table(bwnet$colors))-1`** modules were identified (plus an additional unassigned module (grey)).
+
+## Module correlations with metadata
+
+Find correlation between module eigengenes and metadata traits.
+Find modules associated with inflammation.
+
+```{r, fig.width=15,fig.height=8, results='asis',echo=FALSE}
+#get number of samples
+nSamples=nrow(tpm)
+# Reorder MEs so that correlated MEs are side by side
+MEs = orderMEs(MEs)
+
+#write out the MEs
+rownames(MEs)=rownames(traitData)
+write.csv(MEs,here("Data","Generated","discovery_MEs.csv"))
+
+#rename the MEs from their color names to the numbers used int he manuscript
+namekey=read.csv(here("Data","Input","module_number_key.csv"),header=F)
+colnames(MEs)=gsub("ME","",colnames(MEs))
+colnames(MEs)=namekey[match(colnames(MEs),namekey[,1]),2]
+
+#correlate MEs vs numerical versions of traits
+numTraitData=data.frame(lapply(traitData,as.numeric))
+moduleTraitCor = cor(MEs, numTraitData, use = "p")
+moduleTraitPvalue = corPvalueStudent(moduleTraitCor, nSamples)
+padj=matrix(p.adjust(moduleTraitPvalue,method="fdr"),ncol=17,byrow = F)
+colnames(padj)=colnames(traitData)
+rownames(padj)=rownames(moduleTraitPvalue)
+#remove traits and modules with no significant associations
+nonsigrows=which(rowSums(moduleTraitPvalue<0.05)==0)
+nonsigcols=which(colSums(moduleTraitPvalue<0.05)==0)
+
+colorer=colorRampPalette(rev(brewer.pal(11,"RdBu")))
+
+#full heat
+P=ifelse(moduleTraitPvalue<0.05,1,0)
+cat("**All modules/trait correlations (squares indicate p<0.05)**")
+simpHeat(t(moduleTraitCor),t(P),colorer(11))
+
+#filtered heat
+filtCor=moduleTraitCor[-nonsigrows,-nonsigcols]
+filtP=moduleTraitPvalue[-nonsigrows,-nonsigcols]
+filtP=ifelse(filtP<0.05,1,0)
+cat("**Modules/traits with at least one nominally significant correlation (p<0.05)**")
+simpHeat(t(filtCor),t(filtP),colorer(11))
+
+#adjust p significant
+nonsigarows=which(rowSums(padj<0.05)==0)
+nonsigacols=which(colSums(padj<0.05)==0)
+filtadjCor=moduleTraitCor[-nonsigarows,-nonsigacols]
+filtadjP=padj[-nonsigarows,-nonsigacols]
+filtadjP=ifelse(filtadjP<0.05,1,0)
+cat("**Modules/traits with at least one FDR significant correlation (FDR p<0.05)**")
+simpHeat(t(filtadjCor),t(filtadjP),colorer(11))
+
+#reduced version 
+filtadjCorClean=filtadjCor[,c(10,9,8,4,3,2,15)]
+filtadjPClean=filtadjP[,c(10,9,8,4,3,2,15)]
+colnames(filtadjCorClean)=c("Anti-TNF","Anti-Integrin","Corticosteroids","Sampling Site","NANCY Score","Inflammation Status","IBD Status")
+rownames(filtadjCorClean)=gsub("ME","",rownames(filtadjCorClean))
+rownames(filtadjPClean)=rownames(filtadjCorClean)
+colnames(filtadjPClean)=colnames(filtadjCorClean)
+
+simpHeat(t(filtadjCorClean),t(filtadjPClean),colorer(11))+scale_fill_gradientn(colors=colorer(11),breaks=c(-0.8,0,0.8),labels=c(-0.8,0,0.8),limits=c(-0.8,0.8))+scale_color_manual(values=c("black",NA),labels=c("FDR<0.05",""),name="Significance")
+ggsave(here("Plots","discovery_cleaned_metadata_heatmap.pdf"),width = 15,height = 8)
+
+#second cleaned-up version for paper
+removevars=c(11,6,10,9,8)
+filtadjCorClean2=filtadjCor[,-removevars]
+filtadjPClean2=filtadjP[,-removevars]
+rownames(filtadjCorClean2)=gsub("ME","",rownames(filtadjCorClean2))
+rownames(filtadjPClean2)=rownames(filtadjCorClean2)
+
+simpHeat(t(filtadjCorClean2),t(filtadjPClean2),colorer(11))+scale_fill_gradientn(colors=colorer(11),breaks=c(-0.8,0,0.8),labels=c(-0.8,0,0.8),limits=c(-0.8,0.8))+scale_color_manual(values=c("black",NA),labels=c("FDR<0.05",""),name="Significance")
+ggsave(here("Plots","discovery_cleaned_metadata_heatmap_selected_variables.pdf"),,width = 15,height = 8)
+
+pas=data.frame(padj)
+ps=data.frame(moduleTraitPvalue)
+cs=data.frame(moduleTraitCor)
+NANCY=data.frame(Module=rownames(cs),Cor=cs$NANCYscore,p=ps$NANCYscore,FDR=pas$NANCYscore)
+#write out list of modules  FDRsignificant with NANCY
+write.table(NANCY,here("Data","Generated","discovery_NANCY_module_correlations.tsv"),sep="\t",row.names = F)
+
+```
+
+It is clear that the modules are largely correlating with differences in inflammation status. Especially given the FDR adjusted p-values. Nicely, the medication traits are showing opposing effects. The only traits with no nominally significant module associations were **`r names(nonsigcols)`**. The only modules with no significant associations were **`r names(nonsigrows)`**.
+
+```{r echo=FALSE}
+# Write Module Stats to Files
+# Define variable weight containing the NANCY score
+weight = as.data.frame(traitData$NANCYscore)
+names(weight) = "weight"
+# names (colors) of the modules
+modNames = names(MEs)
+#correlation between gene and modules, cor and p-value
+geneModuleMembership = as.data.frame(cor(tpm, MEs, use = "p"))
+MMPvalue = as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership), nSamples));
+names(geneModuleMembership) = paste("MM", modNames, sep="");
+names(MMPvalue) = paste("p.MM", modNames, sep="");
+#correlation between gene and inflammed status
+geneTraitSignificance = as.data.frame(cor(tpm, weight, use = "p"));
+GSPvalue = as.data.frame(corPvalueStudent(as.matrix(geneTraitSignificance), nSamples));
+names(geneTraitSignificance) = paste("GS_NANCYscore.", names(weight), sep="");
+names(GSPvalue) = paste("p.GS_NANCYscore.", names(weight), sep="");
+
+#rename the gene identifiers to gene names using the original input table
+geneids=colnames(tpm)
+geneids2names=match(geneids,tpmcounts$gene_id)
+# Create the starting data frame
+geneInfo0 = data.frame(geneid = geneids,
+geneName = tpmcounts$gene_name[geneids2names],
+moduleColor = bwModuleColors,
+geneTraitSignificance,
+GSPvalue)
+# Order modules by their significance for weight
+modOrder = order(-abs(cor(MEs, weight, use = "p")));
+# Add module membership information in the chosen order
+for (mod in 1:ncol(geneModuleMembership))
+{
+oldNames = names(geneInfo0)
+geneInfo0 = data.frame(geneInfo0, geneModuleMembership[, modOrder[mod]],
+MMPvalue[, modOrder[mod]]);
+names(geneInfo0) = c(oldNames, paste("MM.", modNames[modOrder[mod]], sep=""),
+paste("p.MM.", modNames[modOrder[mod]], sep=""))
+}
+# Order the genes in the geneInfo variable first by module color, then by geneTraitSignificance
+geneOrder = order(geneInfo0$moduleColor, -abs(geneInfo0$GS_NANCYscore.weight));
+geneInfo = geneInfo0[geneOrder, ]
+write.csv(geneInfo, file = here("Data","Generated","discovery_WGCNAgeneInfo.csv"), row.names=F)
+
+#write a table of the module correlations with clinical traits
+colnames(moduleTraitCor)=paste0(colnames(moduleTraitCor),"_Cor")
+colnames(moduleTraitPvalue)=paste0(colnames(moduleTraitPvalue),"_Pvalue")
+padjcopy=padj
+colnames(padjcopy)=paste0(colnames(moduleTraitPvalue),"_FDR_Pvalue")
+modcorframe=cbind(moduleTraitCor,moduleTraitPvalue,padjcopy)
+modcorframe=modcorframe[order(rownames(modcorframe)),order(colnames(modcorframe))]
+rownames(modcorframe)=substring(rownames(modcorframe),3)
+write.csv(modcorframe,file=here("Data","Generated","discovery_WGCNAmodInfo.csv"))
+```
+
+## **GO Term enrichment analysis of modules**
+
+```{r warnings=FALSE,cache=TRUE, echo=FALSE}
+#use the biomart library to convert our ensembl to entrez ids
+ensembl=useMart("ensembl",dataset="hsapiens_gene_ensembl")
+map = getBM(c("ensembl_gene_id","entrezgene_id"), filters=c("ensembl_gene_id","with_entrezgene"), values=list(colnames(tpm),TRUE), mart=ensembl)
+#filter ensembl genes with no equivalent entrez ID
+keep=which(colnames(tpm)%in%map$ensembl_gene_id)
+keepmods=bwModuleColors[keep]
+keepgenes=colnames(tpm)[keep]
+
+#convert gene names to entrez
+id2entrez=match(keepgenes,map$ensembl_gene_id)
+entrez=map$entrezgene[id2entrez]
+#carry out GSEA, keep top 10 GO terms enriched in each module
+GOenr = GOenrichmentAnalysis(keepmods, entrez, organism = "human", nBestP = 10, verbose = F)
+#enrichment terms for each module
+tab = GOenr$bestPTerms[[4]]$enrichment
+tab$module=namekey[match(tab$module,namekey[,1]),2]
+write.table(tab, file = here("Data","Generated","discovery_WGCNAGOEnrichmentTable.csv"), sep = ",", quote = TRUE, row.names = TRUE)
+
+```
+
+A total of **`r length(keepgenes)`** were mapped to Entrez gene IDs and used for the GO enrichment analysis. This was performed across **`r length(unique(keepmods))`** keeping the top 10 enriched terms. Results for some modules of interest are shown below.
+
+```{r,results='asis', echo=FALSE}
+#as an example print the results for the modules most strikingly correlated with inflammation
+plottab=function(col,tab){
+  return(kable(tab[which(tab$module==col),c(1,2,5,6,11,13)]))
+}
+
+fpdat=data.frame(padj)
+cdat=data.frame(moduleTraitCor)
+
+cat("\n\n### Modules postively correlated with NANCY score (FDR p<0.05)")
+
+for(i in 1:nrow(fpdat)){
+  if(fpdat$NANCYscore[i]<0.05&cdat$NANCYscore_Cor[i]>0){
+    print(plottab(rownames(fpdat)[i],tab))
+  }
+}
+
+cat("\n\n### Modules negatively correlated with NANCY score (FDR p<0.05)")
+
+for(i in 1:nrow(fpdat)){
+  if(fpdat$NANCYscore[i]<0.05&cdat$NANCYscore_Cor[i]<0){
+    print(plottab(rownames(fpdat)[i],tab))
+  }
+}
+
+```
+
+```{r echo=F, code=readLines("Scripts/plot_module_networks.R")}
+```
+
+
+## **Summary of output files**
+
+*discovery_module_analysis.html* - This report showing all the steps in the analysis.
+
+*discovery_WGCNAgeneInfo.csv* - Table showing the module assignment for each gene, its correlation with inflammation, and its correlation with all other modules.
+
+*discovery_WGCNAmodInfo.csv* - Table showing the module correlations with all clinical traits including inflammation.
+
+*discovery_WGCNAGOEnrcihmentTable.csv* - Table contianing the top 10 GO terms enriched for in each module.
+
+*TOM-block.-.Rds* - Topological overlap matrices used to generate the modules (generated blockwise).
+
+*discovery_filtered_tpm.Rds* - The TPMs after filtering used to make the modules. Passed to the network script to name the genes.
+
+*discovery_NANCY_module_correlations.tsv* - Eigengene correlation values and significance for each module vs NANCY scores.
+
+Additional plots not included in the markdown are network plots of the gene networks within each module, which are in Plots/Networks at various TOM thresholds.
+
+
+
+
