@@ -1,0 +1,217 @@
+---
+title: "Gene set enrichment analysis"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(here)
+library(magrittr)
+library(clusterProfiler)
+library(tidyverse)
+library(org.Hs.eg.db)
+library(vroom)
+library(msigdbr)
+library(ggplot2)
+library(gplots)
+library(egg)
+library(RColorBrewer)
+```
+
+# Pathway analysis on tissue type assignment of modules from the discovery cohort
+
+Modules were assigned as stromal, granulocyte or epthelial based on the cell type deconvolution analysis.
+Pathway analysis was carried out on the combined sets of genes within modules assigned to each of these three cell types.
+
+```{r mod_paths, include=F}
+#genes-of-interest: extracting genes contained in WGCNA modules of interest
+modules<-read.csv(here("Data","Input","module_gene_mapping.csv"), header = TRUE, row.names=1) #read in genes-to-module assignments
+modules<-modules[,c(1,2)]
+stromal<-modules %>% dplyr::filter(moduleColor==c("M1","M2","M3","M4","M9","M10"))
+granulocyte<-modules %>% dplyr::filter(moduleColor==c("M5","M7"))
+epithelial<-modules %>% dplyr::filter(moduleColor==c("M17","M18","M19","M20","M21","M22","M23","M24"))
+str_sym<-as.character(stromal[,1])
+gran_sym<-as.character(granulocyte[,1])
+epithelial_sym<-as.character(epithelial[,1])
+
+#convert to entrez IDs for use in ClusterProfiler
+entrez_ids_stromal<-bitr(str_sym, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db")
+entrez_ids_gran<-bitr(gran_sym, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db")
+entrez_ids_epithelial<-bitr(epithelial_sym, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db")
+stromal <- stromal[stromal$geneName %in% entrez_ids_stromal$SYMBOL,]#keep only rows where entrezID was found
+granulocyte <- granulocyte[granulocyte$geneName %in% entrez_ids_stromal$SYMBOL,]#keep only rows where entrezID was found
+epithelial <- epithelial[epithelial$geneName %in% entrez_ids_stromal$SYMBOL,]#keep only rows where entrezID was found
+stromal<-stromal[,1]
+granulocyte<-granulocyte[,1]
+epithelial<-epithelial[,1]
+stromal<-entrez_ids_stromal$ENTREZID
+granulocyte<-entrez_ids_gran$ENTREZID
+epithelial<-entrez_ids_epithelial$ENTREZID
+
+#creating the background lists = all detected genes except genes-of-interest
+background_all <- modules[,1]
+background_all<-bitr(background_all, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db")
+background_all<-background_all[,2]
+
+#GO ("cellular component") analysis in ClusterProfiler
+ego_str <- enrichGO(gene          = stromal,
+                    universe      = names(background_all),
+                    OrgDb         = org.Hs.eg.db,
+                    ont           = "CC",
+                    pAdjustMethod = "fdr",
+                    pvalueCutoff  = 0.1,
+                    qvalueCutoff  = 0.1,
+                    readable      = TRUE)
+ego_gran <- enrichGO(gene          = granulocyte,
+                    universe      = names(background_all),
+                    OrgDb         = org.Hs.eg.db,
+                    ont           = "CC",
+                    pAdjustMethod = "fdr",
+                    pvalueCutoff  = 0.1, #permissive thresholds here to just get a picture of the top pathways
+                    qvalueCutoff  = 0.1,
+                    readable      = TRUE)
+ego_epi <- enrichGO(gene          = epithelial,
+                    universe      = names(background_all),
+                    OrgDb         = org.Hs.eg.db,
+                    ont           = "CC",
+                    pAdjustMethod = "fdr",
+                    pvalueCutoff  = 0.1,
+                    qvalueCutoff  = 0.1,
+                    readable      = TRUE)
+edox_str <- setReadable(ego_str, 'org.Hs.eg.db', 'ENTREZID')
+edox_gran <- setReadable(ego_gran, 'org.Hs.eg.db', 'ENTREZID')
+edox_epi <- setReadable(ego_epi, 'org.Hs.eg.db', 'ENTREZID')
+
+#creating dotplots
+coul <-colorRampPalette(brewer.pal(7,"RdYlBu"))(299)
+borderer <- list(geom_point(color="black",shape=19),geom_point(shape=20))
+str_dot <- dotplot(edox_str, showCategory=10) + ggtitle("dotplot for stromal enriched pathways")+
+  scale_color_gradientn(colors=coul)+borderer#chose own color gradient and add border
+gran_dot <- dotplot(edox_gran, showCategory=10) + ggtitle("dotplot for granulocyte enriched pathways")+
+  scale_color_gradientn(colors=coul)+borderer
+epi_dot <- dotplot(edox_epi, showCategory=10) + ggtitle("dotplot for epithelial enriched pathways")+
+  scale_color_gradientn(colors=coul)+borderer
+
+gg1<-ggarrange(str_dot+scale_color_gradientn(colors=coul),gran_dot+scale_color_gradientn(colors=coul),epi_dot+scale_color_gradientn(colors=coul), ncol=1)#make ggplots the same size
+ggsave(plot=gg1, filename=here("Plots","dotplots_geneset_enrichment_from_modules.pdf"), device="pdf",width=12, height=22,useDingbats=FALSE) 
+
+```
+```{r plot_mod, include=T, fig.width=12, fig.height=18}
+plot(gg1)
+```
+
+# Pathway analysis of sorted bulk Neutrophils and MNPs
+
+Differential expression analysis was performed on RNA from sorted neutrophils and mono-nuclear macrophages using DESeq2. Here we look for pathways enriched in genes overexpressed in neutrophils relative to MNPs and vice versa.
+
+## Neutrophils over MNPs
+
+```{r, include=F}
+#########neutrophil-specific pathways############
+MoverN<-read.csv(here("Data","Input","differential_expression_results_sorted_MNPs_vs_neutrophs.csv"), header=T)# reading in DESeq2 output of neutrophil-MNP differential gene expression
+
+#filter for Padj<0.05 and |log2FC| 
+Nt<-MoverN[MoverN[,8]<0.05,]
+Nt<-Nt[Nt[,4]< -2,] # < -2, as DESeq2 output produced MNP over neutrophil differential expression
+Nt<-Nt[order(Nt$log2FoldChange),]
+gene_symbols<-as.character(Nt[,2])
+
+#get entrez ids for ClutersProfiler
+entrez_ids_Nt<-bitr(gene_symbols, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db") #convert gene symbols into EntrezID
+Nt <- Nt[Nt$gene_name %in% entrez_ids_Nt$SYMBOL,]#keep only rows where entrezID was found
+Nt<-Nt[,c(1,4)]
+Nt[,1]<-entrez_ids_Nt$ENTREZID #assign entrez IDs to fold changes
+
+#list of interest
+ids_Nt<-Nt[,1]
+ordered_Nt<-Nt[,2]
+ordered_Nt<-abs(ordered_Nt)
+names(ordered_Nt)<-ids_Nt
+
+#background list = alldetected genes
+background_MN <- MoverN[,2]
+background_MN<-bitr(background_MN, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db")
+background_MN<-background_MN[,2]
+
+
+#GO annotations ("cellular component")
+ego_Nt <- enrichGO(gene          = ids_Nt,
+                universe      = names(background_MN),
+                OrgDb         = org.Hs.eg.db,
+                ont           = "CC",
+                pAdjustMethod = "fdr",
+                pvalueCutoff  = 0.01,
+                qvalueCutoff  = 0.05,
+                readable      = TRUE)
+edox_Nt <- setReadable(ego_Nt, 'org.Hs.eg.db', 'ENTREZID')
+
+#dot plot
+Nt_dot <- dotplot(edox_Nt, showCategory=10) + ggtitle("dotplot for NoverM enriched pathways")+
+  scale_color_gradientn(colors=coul)+borderer#chose own color gradient
+
+coul2 <-colorRampPalette(rev(brewer.pal(7,"RdYlBu")))(299)
+
+#cnetplot
+Nt_cnet <- cnetplot(edox_Nt, showCategory=9, foldChange=ordered_Nt)+scale_color_gradientn(colors=coul2)#chose own color gradient
+```
+
+```{r include=T, fig.width=14, fig.height=6}
+
+ggarrange(Nt_dot,Nt_cnet, ncol=2, widths = c(2,3))
+
+```
+
+## MNPs over Neutrophils
+
+```{r include=F}
+#filter for Padj<0.05 and |log2FC| >2 
+MoN<-MoverN[MoverN[,8]<0.05,]
+MoN<-MoN[MoN[,4]>2,] #here using >2, as DESeq2 output produced MNP over neutrophil differential expression
+MoN<-MoN[order(-MoN$log2FoldChange),]
+MoN[duplicated(MoN$gene_name), ]#check for dups
+MoN<-MoN[!duplicated(MoN$gene_name), ] #remove dups
+gene_symbols<-as.character(MoN[,2])
+
+#convert to entrez ids for ClusterProfiler
+entrez_ids_MoN<-bitr(gene_symbols, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db") #convert gene symbols into EntrezID
+entrez_ids_MoN<-entrez_ids_MoN[!duplicated(entrez_ids_MoN$SYMBOL), ] #remove other dups
+MoN <- MoN[MoN$gene_name %in% entrez_ids_MoN$SYMBOL,]#keep only rows where entrezID was found
+MoN<-MoN[,c(1,4)]
+MoN[,1]<-entrez_ids_MoN$ENTREZID #assign entrez IDs to fold changes
+
+#lists of interest
+ids_MoN<-MoN[,1]
+ordered_MoN<-MoN[,2]
+ordered_MoN<-abs(ordered_MoN)
+names(ordered_MoN)<-ids_MoN
+
+#GO annotations ("cellular component")
+ego_MoN <- enrichGO(gene          = ids_MoN,
+                    universe      = names(background_MN),
+                    OrgDb         = org.Hs.eg.db,
+                    ont           = "CC",
+                    pAdjustMethod = "fdr",
+                    pvalueCutoff  = 0.01,
+                    qvalueCutoff  = 0.05,
+                    readable      = TRUE)
+edox <- setReadable(ego_MoN, 'org.Hs.eg.db', 'ENTREZID')
+MoN_dot <- dotplot(edox, showCategory=10) + ggtitle("dotplot for MoverN enriched pathways")+
+  scale_color_gradientn(colors=coul)+borderer
+MoN_cnet <- cnetplot(edox, showCategory=9, foldChange=ordered_MoN)+scale_color_gradientn(colors=coul2)
+
+```
+
+```{r include=T,fig.width=14, fig.height=6}
+ggarrange(MoN_dot,MoN_cnet, ncol=2, widths = c(2,3))
+```
+
+
+```{r saveplots, include=F}
+gg1<-ggarrange(Nt_dot, MoN_dot, ncol=1)#make ggplots the same size
+gg2<-ggarrange(Nt_cnet, MoN_cnet, ncol=1)
+ggsave(plot=gg1, filename=here("Plots","n_vs_MNP_dotplots.pdf"), width=10, height=12, device="pdf", useDingbats=FALSE) 
+ggsave(plot=gg2, filename=here("Plots","n_vs_MNP_netplots.pdf"), width=10, height=10,  device="pdf", useDingbats=FALSE) 
+
+```
