@@ -93,12 +93,13 @@ colmapper=c("M5"="orange","M4"="paleturquoise")
 
 comb$GeneLabel=ifelse(comb$ModuleA%in%c("M4","M5"),as.character(comb$Gene),NA)
 comb$PCol=ifelse(comb$ModuleA%in%c("M4","M5"),colmapper[comb$ModuleA],NA)
-comb$PCol2=ifelse(comb$ModuleA%in%c("orange","paleturquoise"),"black",NA)
+comb$PCol2=ifelse(comb$ModuleA%in%c("M4","M5"),"black",NA)
 ```
 
 ## Scatter plot
 
 ```{r scatterplot, fig.width=10, fig.height=10}
+
 ggplot(comb,aes(x=AUCA,y=AUCH))+geom_point(size=0.75)+geom_point(color=as.character(comb$PCol2),size=2.25)+geom_point(color=as.character(comb$PCol),size=2)+geom_smooth(method="lm",se=F,col="red",lty=2)+xlab("AUC Arjis et al. 2009")+ylab("AUC Habermann et al.")+geom_label_repel(aes(label=GeneLabel),fill=comb$PCol)+theme_classic()
 
 ggsave(here("Plots","all_genes_auc_M4_M5_labelled.pdf"),height=10,width=10)
