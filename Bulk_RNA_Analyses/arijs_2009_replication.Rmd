@@ -1,0 +1,178 @@
+---
+title: "Replication of WGCNA Modules in Arijs 2009 data"
+output: html_document
+editor_options: 
+chunk_output_type: console
+---
+
+# Load in the replication data
+
+```{r echo=FALSE}
+#load BioFunk
+source("~/devel/Useful_Scripts/BioFunk.R")
+#load WGCNA
+suppressPackageStartupMessages(library(WGCNA))
+allowWGCNAThreads()
+options(stringsAsFactors = FALSE)
+suppressPackageStartupMessages(library("GEOquery"))
+suppressPackageStartupMessages(library("affy"))
+suppressPackageStartupMessages(library(ggbeeswarm))
+suppressPackageStartupMessages(library(ggpubr))
+library(here)
+library(knitr)
+library(cowplot)
+set.seed(666)
+theme_set(theme_cowplot())
+
+#### the below commands were originally used to generate the normalised data ####
+
+#getGEOSuppFiles("GSE16879")
+#untar("GSE16879_RAW.tar",exdir="data")
+#cels=list.files("data/",pattern="CEL")
+#setwd("data/")
+#raw.data = ReadAffy(verbose = FALSE, filenames = cels)
+#data.rma.norm = rma(raw.data)
+#rma = exprs(data.rma.norm)
+#write.table(rma, file = "normalised_array_exp.tsv", quote = FALSE, sep = "\t")
+
+#read in the normalised data
+#expdat=read.table("normalised_array_exp.tsv",header=T,sep="\t")
+#mapped=t(expdat)
+#convert the probes names to gene ids
+#library(hgu133plus2.db)
+#mapping=data.frame(hgu133plus2ENSEMBL)
+#colnames(mapped)=mapping$ensembl_id[match(colnames(mapped),mapping$probe_id)]
+#mapped=mapped[,-which(is.na(colnames(mapped)))]
+#mapped=mergDupCol(mapped,TRUE)
+#rownames(mapped)=gsub(".CEL.gz","",rownames(mapped))
+#clean_expr_dat=t(mapped)
+#write.table(clean_expr_dat,"Arjis_2009_cleaned_expr_dat.tsv",sep="\t")
+
+repdat=read.table(here("Data","Input","Arijs_2009_cleaned_expr_dat.tsv"),sep="\t")
+
+#### the code below was originally used to generate the metadata table ####
+
+#load the metadata downloaded from the GEO website
+#geodat=getGEO(filename="GSE16879_series_matrix.txt.gz")
+#geometa=pData(geodat)
+#metasmall=geometa[,c(1,2,36,37,38,39)]
+#pt=ifelse(metasmall$`before or after first infliximab treatment:ch1`=="After first infliximab treatment",1,0)
+#pt[metasmall$`before or after first infliximab treatment:ch1`=="Not applicable"]=NA
+#re=ifelse(metasmall$`response to infliximab:ch1`=="Yes",1,0)
+#re[metasmall$`response to infliximab:ch1`=="Not applicable"]=NA
+#meta=data.frame(
+#  GID=metasmall$geo_accession,
+#  Sample_Name=metasmall$title,
+#  Individual=unlist(lapply(strsplit(metasmall$title,"_"),"[[",1)),
+#  PostTreatment=pt,
+#  Control=ifelse(metasmall$`disease:ch1`=="Control",1,0),
+#  UC=ifelse(metasmall$`disease:ch1`=="UC",1,0),
+#  CD=ifelse(metasmall$`disease:ch1`=="CD",1,0),
+#  IBD_Combined=ifelse(metasmall$`disease:ch1`=="CD"|metasmall$`disease:ch1`=="UC",1,0),
+#  aTNF_Response=re,
+#  Tissue=ifelse(metasmall$`tissue:ch1`=="Colon",1,0)
+#)
+#write.table(meta,"Arijs_2009_cleaned_meta_table.tsv",sep="\t")
+
+metadat=read.table(here("Data","Input","Arijs_2009_cleaned_meta_table.tsv"),sep="\t")
+metadat=data.frame(lapply(metadat,factor))
+metadat=rowNamer(metadat)
+metadat=metadat[match(rownames(metadat),colnames(repdat)),]
+metadat=metadat[,-which(colnames(metadat)=="Sample_Name")]
+```
+
+Microarray data was downloaded from the Arijs et al. 2009 PLoS One paper as raw image data from (GEO:GSE16879).
+This contained **`r nrow(metadat)`** samples and **`r nrow(repdat)`** genes.
+Microarray data was normalised using the robust multi-array average (RMA) measure.
+
+# Map to discovery cohort modules
+
+```{r, echo=FALSE}
+#our module data
+moddefs=read.csv(here("Data","Generated","discovery_WGCNAgeneInfo.csv"))
+modcors=read.csv(here("Data","Generated","discovery_WGCNAmodInfo.csv"))
+moddefs=moddefs[-which(moddefs$moduleColor=="unassigned"),]
+
+#list of modules significantly associated with NANCY score
+signancy=modcors[modcors$NANCYscore_Pvalue_FDR_Pvalue<0.05,]
+
+#match replication data and module defs
+matchdef=moddefs[moddefs$geneid%in%rownames(repdat),]
+matchrep=repdat[match(matchdef$geneid,rownames(repdat)),]
+
+#calculate the module coverages in the replication data set (gene % observed)
+modcov=data.frame(Original=table(moddefs$moduleColor),Replication=table(matchdef$moduleColor))
+modcov=modcov[,-3]
+colnames(modcov)=c("Module","Original Size (No. Genes)","Replication Size (No. Genes)")
+modcov$Percentage=(modcov[,3]/modcov[,2])*100
+modcov$NANCYsig=ifelse(modcov$Module%in%signancy$X,1,0)
+colnames(modcov)[ncol(modcov)]="FDR Sig. with NANCY Score in discovery cohort."
+modcov=modcov[order(modcov$Percentage,decreasing = T),]
+
+```
+
+In our unbiased analysis we had **`r nrow(moddefs)`** genes assigned to a module (excluding the genes assigned to grey).
+From these, **`r nrow(matchdef)`** were also in the replication data set (**`r round((nrow(matchdef)/nrow(moddefs))*100)`%**).
+
+## Module overlaps
+
+`r kable(modcov,format="markdown",row.names=F)`
+
+# Module eigengene differences in pre-treatment samples by treatment response
+
+```{r echo=FALSE, fig.width=10, results="asis"}
+#generate the module eigengenes
+RepMEList = moduleEigengenes(t(matchrep), colors = matchdef$moduleColor, excludeGrey = TRUE,)
+RepMEs = RepMEList$eigengenes
+colnames(RepMEs)=gsub("ME","",colnames(RepMEs))
+
+#remove non NANCY associated MEs
+RepMEs = RepMEs[,colnames(RepMEs)%in%signancy$X]
+
+#write out the pretreatment MEs for the AUC analysis
+write.csv(RepMEs[which(metadat$PostTreatment==0),],here("Data","Generated","Arijs_2009_pre_treat_MEs.csv"))
+```
+
+## Pre-treatment differences by response 
+
+```{r, fig.height=15, fig.width=10,results="asis",echo=F}
+#get the color mapping from the name
+namekey=read.csv(here("Data","Input","module_number_key.csv"),header=F)
+
+preMEs=RepMEs[which(metadat$PostTreatment==0),]
+preMeta=metadat[which(metadat$PostTreatment==0),]
+
+preMeta$aTNF_Response=as.character(preMeta$aTNF_Response)
+preMeta$aTNF_Response[preMeta$aTNF_Response==1]="Yes"
+preMeta$aTNF_Response[preMeta$aTNF_Response==0]="No"
+preMeta$aTNF_Response=factor(preMeta$aTNF_Response)
+
+preplots=list()
+ps=c()
+for(i in 1:ncol(preMEs)){
+  me=preMEs[,i]
+  mename=colnames(preMEs)[i]
+  groups=preMeta$aTNF_Response
+  colorname=namekey[namekey[,2]==mename,1]
+  df=data.frame("Eigengene"=me,"Response"=groups)
+  pl=ggplot(df,aes(x=Response,y=Eigengene,fill=colorname))+geom_boxplot()+geom_quasirandom()+
+    ylab(paste0(mename))+scale_fill_manual(values=colorname)+guides(fill=F)
+  preplots[[mename]]=pl
+  test=wilcox.test(me~groups)
+  ps=c(ps,test$p.value)
+}
+
+adjp=p.adjust(ps,method="fdr")
+siglist=preplots[adjp<0.05]
+
+cat("**Wilcox results responders vs. non-responders pre-treatment**")
+psdf=data.frame("Module"=colnames(preMEs),"Wilcox_p"=ps,"Wilcox_FDR_p"=adjp)
+psdf=psdf[order(adjp),]
+kable(psdf)
+
+write.csv(psdf,here("Data","Generated","Arijs_2009_pretreatment_wilcox_eigengenes.csv"))
+
+c("**Boxplots for FDR significant results**")
+plot_grid(plotlist = siglist[psdf$Module[psdf$Wilcox_FDR_p<0.05]], ncol=4)
+ggsave(here("Plots","Arijs_2009_reponder_pre_treatment_boxplots.pdf"),width=13.33,height=30)
+```

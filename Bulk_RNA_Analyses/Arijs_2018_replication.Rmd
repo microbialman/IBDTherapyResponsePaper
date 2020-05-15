@@ -1,0 +1,203 @@
+---
+title: "Replication of WGCNA Modules in Arijs 2018 data"
+output: html_document
+editor_options: 
+chunk_output_type: console
+---
+
+# Load in the replication data
+
+```{r echo=FALSE}
+#load BioFunk
+source("~/devel/Useful_Scripts/BioFunk.R")
+library(here)
+#load WGCNA
+suppressPackageStartupMessages(library(WGCNA))
+allowWGCNAThreads()
+options(stringsAsFactors = FALSE)
+suppressPackageStartupMessages(library("GEOquery"))
+suppressPackageStartupMessages(library("affy"))
+library(knitr)
+suppressPackageStartupMessages(library(ggbeeswarm))
+suppressPackageStartupMessages(library(ggpubr))
+set.seed(666)
+
+theme_set(theme_cowplot())
+
+#### commands used to generate the normalised data ####
+#getGEOSuppFiles("GSE73661")
+#untar("GSE73661_RAW.tar",exdir="data")
+#cels=list.files("data/",pattern="CEL")
+#setwd("data/")
+#raw.data = ReadAffy(verbose = FALSE, filenames = cels)
+#data.rma.norm = rma(raw.data)
+#rma = exprs(data.rma.norm)
+#write.table(rma, file = "normalised_array_exp.tsv", quote = FALSE, sep = "\t")
+
+#read in the normalised data
+#expdat=read.table("normalised_array_exp.tsv",header=T,sep="\t")
+#mapped=t(expdat)
+#convert the probes names to gene ids
+#library(hugene10sttranscriptcluster.db)
+#mapping=data.frame(hugene10sttranscriptclusterENSEMBL)
+#colnames(mapped)=mapping$ensembl_id[match(colnames(mapped),mapping$probe_id)]
+#mapped=mapped[,-which(is.na(colnames(mapped)))]
+#mapped=mergDupCol(mapped,TRUE)
+#rownames(mapped)=gsub(".CEL.gz","",rownames(mapped))
+#clean_expr_dat=t(mapped)
+#write.table(clean_expr_dat,"cleaned_expr_dat.tsv",sep="\t")
+
+repdat=read.table(here("Data","Input","Arijs_2018_cleaned_expr_dat.tsv"), sep="\t")
+colnames(repdat)=lapply(strsplit(colnames(repdat),"_"),"[[",1)
+
+#### Original code to generate the metadata table ####
+
+#load the metadata downloaded from GEO
+#geodat=getGEO(filename="GSE73661_series_matrix.txt.gz")
+#geometa=pData(geodat)
+#metasmall=geometa[,c(1,2,36,37,38,39,40)]
+#write.table(metasmall,"cleaned_meta_table.tsv",sep="\t")
+
+metadat=read.table(here("Data","Input","Arijs_2018_cleaned_meta_table.tsv"),sep="\t")
+metadat=data.frame(lapply(metadat,factor))
+rownames(metadat)=metadat$geo_accession
+metadat=metadat[match(rownames(metadat),colnames(repdat)),]
+
+repdat=repdat[,match(colnames(repdat),rownames(metadat))]
+
+```
+
+Microarray data was downloaded from the Arijs et al. 2018 Gut paper as raw image data from (GEO:GSE73661).
+Post-processing, this contained **`r nrow(metadat)`** samples and **`r nrow(repdat)`** genes.
+Microarray data was normalised using the robust multi-array average (RMA) measure.
+
+# Map to the modules from the discovery dataset
+
+```{r, echo=FALSE}
+#our module data
+moddefs=read.csv(here("Data","Generated","discovery_WGCNAgeneInfo.csv"))
+modcors=read.csv(here("Data","Generated","discovery_WGCNAmodInfo.csv"))
+moddefs=moddefs[-which(moddefs$moduleColor=="unassigned"),]
+
+#list of modules significantly associated with NANCY score
+signancy=modcors[modcors$NANCYscore_Pvalue_FDR_Pvalue<0.05,]
+
+#match replication data and module defs
+matchdef=moddefs[moddefs$geneid%in%rownames(repdat),]
+matchrep=repdat[match(matchdef$geneid,rownames(repdat)),]
+
+#calculate the module coverages in the replication data set (gene % observed)
+modcov=data.frame(Original=table(moddefs$moduleColor),Replication=table(matchdef$moduleColor))
+modcov=modcov[,-3]
+colnames(modcov)=c("Module","Original Size (No. Genes)","Replication Size (No. Genes)")
+modcov$Percentage=(modcov[,3]/modcov[,2])*100
+modcov$NANCYsig=ifelse(modcov$Module%in%signancy$X,1,0)
+colnames(modcov)[ncol(modcov)]="FDR Sig. with NANCY Score in discovery cohort."
+modcov=modcov[order(modcov$Percentage,decreasing = T),]
+
+```
+
+In our unbiased analysis we had **`r nrow(moddefs)`** genes assigned to a module (excluding the genes assigned to grey).
+From these, **`r nrow(matchdef)`** were also in the replication data set (**`r round((nrow(matchdef)/nrow(moddefs))*100)`%**).
+
+## Module overlaps
+
+`r kable(modcov,format="markdown",row.names=F)`
+
+## Prepare data
+
+Responders were defined as anyone who had an endoscopic score of 0 or 1 at any of the time points during the study.
+
+```{r data prep,include=F}
+#generate the module eigengenes
+RepMEList = moduleEigengenes(t(matchrep), colors = matchdef$moduleColor[,drop=TRUE], excludeGrey = TRUE)
+RepMEs = RepMEList$eigengenes
+colnames(RepMEs)=gsub("ME","",colnames(RepMEs))
+
+#remove non NANCY associated MEs
+RepMEs = RepMEs[,colnames(RepMEs)%in%signancy$X]
+#write out the pretreatment MEs
+write.csv(RepMEs[metadat$week..w..ch1=="W0",],here("Data","Generated","Arijs_2018_pre_treatment_MEs.csv"))
+
+#Note responder at any time point
+repmet=metadat[metadat$week..w..ch1=="W0",]
+#remove placebo
+repmet=repmet[-which(repmet$induction.therapy_maintenance.therapy.ch1=="plac_plac"),]
+repmet$study.individual.number.ch1=factor(repmet$study.individual.number.ch1)
+repmet=repmet[,c(3,4,5)]
+#keep note of who is not on vdz
+repmet$vdz_comb=ifelse(repmet$induction.therapy_maintenance.therapy.ch1=="IFX",0,1)
+response=c()
+for(i in repmet$study.individual.number.ch1){
+  samps=metadat[metadat$study.individual.number.ch1==i,]
+  if(0%in%samps$mayo.endoscopic.subscore.ch1||1%in%samps$mayo.endoscopic.subscore.ch1){
+    response=c(response,1)
+  }
+  else{
+    response=c(response,0)
+  }
+}
+repmet$treatment_response=response
+repmet=repmet[,-c(3)]
+
+#write out response data for use elsewhere
+write.csv(repmet,here("Data","Generated","Arijs_2018_w0_with_repsonse_meta.csv"))
+
+#subset data to just pre-treatment timepoints for comparisons
+RepMEs=RepMEs[rownames(metadat)%in%rownames(repmet),]
+
+```
+
+## Pre-treatment expression vs response - split by regimen 
+
+This study had a complex set-up whereby patients were treat on different regimens of anti-integrin therapy with an additional group treated with anti-TNF. To determine module levels in responders/non-responders in these groups were perform ANOVA to indentify modules different between responders by any treatment regime that carry out post-hoc to tests to identify within which treatment regimens that module is different between responsers and non-responders.
+
+```{r, fig.height=5, fig.width=12,results="asis",echo=F}
+
+
+plots=list()
+plotspair=list()
+ps=c()
+
+#get the color mapping from the name
+namekey=read.csv(here("Data","Input","module_number_key.csv"),header=F)
+
+for(i in 1:ncol(RepMEs)){
+  me=RepMEs[,i]
+  mename=colnames(RepMEs)[i]
+  groups=factor(repmet$treatment_response)
+  regime=repmet$induction.therapy_maintenance.therapy.ch1
+  colorname=namekey[namekey[,2]==mename,1]
+  df=data.frame("Eigengene"=me,"Response"=groups,"Regimen"=regime)
+  pl=ggplot(df,aes(y=Eigengene,x=Regimen,fill=Response))+geom_boxplot()+geom_quasirandom()+
+    ylab(paste0(mename))+ggtitle(paste0(mename))+scale_fill_manual(values=c(colorname,"grey"))
+  plots[[mename]]=pl
+  plp=ggplot(df,aes(y=Eigengene,x=Regimen,fill=Response))+geom_boxplot()+geom_quasirandom()+
+    ylab(paste0(mename))+ggtitle(paste0(mename))+scale_fill_manual(values=c(colorname,"grey"))+stat_compare_means(method="wilcox")
+  plotspair[[mename]]=plp
+  test=anova(lm(me~groups+regime))
+  ps=c(ps,test$`Pr(>F)`[1])
+}
+
+adjp=p.adjust(ps,method="fdr")
+siglist=plots[adjp<0.05]
+
+cat("**ANOVA results responders vs. non-responders split by (and adjusting for) different treatments**")
+psdf=data.frame("Module"=colnames(RepMEs),"ANOVA_p"=ps,"ANOVA_adj_p"=adjp)
+psdf=psdf[order(adjp),]
+kable(psdf)
+
+write.csv(psdf,here("Data","Generated","Arijs_2018_split_by_treatment_anova_eigengenes.csv"))
+
+cat("**Boxplots for FDR significant results**")
+plot_grid(plotlist = siglist[c(psdf$Module[psdf$ANOVA_adj_p<0.05])], ncol=2)
+
+cat("**Plots to explore M5 and M4**")
+plot_grid(plotlist=plots[c("M5","M4")], ncol=2)
+ggsave(here("Plots","Arijs_M5_M4_boxplots.pdf"),width=20,height=8)
+
+cat("**Pairwise test for M5 only for paper**")
+plot(plotspair$M5)
+ggsave(here("Plots","Arijs_M5_pairwise.pdf"),width=12,height =8)
+
+```

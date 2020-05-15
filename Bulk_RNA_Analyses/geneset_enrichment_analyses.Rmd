@@ -153,8 +153,8 @@ Nt_dot <- dotplot(edox_Nt, showCategory=10) + ggtitle("dotplot for NoverM enrich
 
 coul2 <-colorRampPalette(rev(brewer.pal(7,"RdYlBu")))(299)
 
-#cnetplot
-Nt_cnet <- cnetplot(edox_Nt, showCategory=9, foldChange=ordered_Nt)+scale_color_gradientn(colors=coul2)#chose own color gradient
+#cnetplot, set number of pathways to include those of interest whilst maintaining legibility
+Nt_cnet <- cnetplot(edox_Nt, showCategory=8, foldChange=ordered_Nt)+scale_color_gradientn(colors=coul2)
 ```
 
 ```{r include=T, fig.width=14, fig.height=6}
@@ -199,11 +199,12 @@ ego_MoN <- enrichGO(gene          = ids_MoN,
 edox <- setReadable(ego_MoN, 'org.Hs.eg.db', 'ENTREZID')
 MoN_dot <- dotplot(edox, showCategory=10) + ggtitle("dotplot for MoverN enriched pathways")+
   scale_color_gradientn(colors=coul)+borderer
-MoN_cnet <- cnetplot(edox, showCategory=9, foldChange=ordered_MoN)+scale_color_gradientn(colors=coul2)
+#cnet plot, set number of pathways to include those of interest whilst maintaining legibility
+MoN_cnet <- cnetplot(edox, showCategory=7, foldChange=ordered_MoN)+scale_color_gradientn(colors=coul2)
 
 ```
 
-```{r include=T,fig.width=14, fig.height=6}
+```{r include=T,fig.width=16, fig.height=6}
 ggarrange(MoN_dot,MoN_cnet, ncol=2, widths = c(2,3))
 ```
 

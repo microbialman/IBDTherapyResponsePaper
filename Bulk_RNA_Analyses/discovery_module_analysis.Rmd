@@ -10,6 +10,9 @@ chunk_output_type: console
 # Data QC
 
 ```{r echo=FALSE}
+#TOGGLE THIS TO TURN ON NETWORK PLOTS - These require the TOM to be built which is a large file so toggle off if the TOM has been removed to save space
+netplots=FALSE
+
 #library here lets things be relative to this repo
 library(here)
 #load BioFunk helper script
@@ -206,18 +209,6 @@ nonsigcols=which(colSums(moduleTraitPvalue<0.05)==0)
 
 colorer=colorRampPalette(rev(brewer.pal(11,"RdBu")))
 
-#full heat
-P=ifelse(moduleTraitPvalue<0.05,1,0)
-cat("**All modules/trait correlations (squares indicate p<0.05)**")
-simpHeat(t(moduleTraitCor),t(P),colorer(11))
-
-#filtered heat
-filtCor=moduleTraitCor[-nonsigrows,-nonsigcols]
-filtP=moduleTraitPvalue[-nonsigrows,-nonsigcols]
-filtP=ifelse(filtP<0.05,1,0)
-cat("**Modules/traits with at least one nominally significant correlation (p<0.05)**")
-simpHeat(t(filtCor),t(filtP),colorer(11))
-
 #adjust p significant
 nonsigarows=which(rowSums(padj<0.05)==0)
 nonsigacols=which(colSums(padj<0.05)==0)
@@ -226,17 +217,6 @@ filtadjP=padj[-nonsigarows,-nonsigacols]
 filtadjP=ifelse(filtadjP<0.05,1,0)
 cat("**Modules/traits with at least one FDR significant correlation (FDR p<0.05)**")
 simpHeat(t(filtadjCor),t(filtadjP),colorer(11))
-
-#reduced version 
-filtadjCorClean=filtadjCor[,c(10,9,8,4,3,2,15)]
-filtadjPClean=filtadjP[,c(10,9,8,4,3,2,15)]
-colnames(filtadjCorClean)=c("Anti-TNF","Anti-Integrin","Corticosteroids","Sampling Site","NANCY Score","Inflammation Status","IBD Status")
-rownames(filtadjCorClean)=gsub("ME","",rownames(filtadjCorClean))
-rownames(filtadjPClean)=rownames(filtadjCorClean)
-colnames(filtadjPClean)=colnames(filtadjCorClean)
-
-simpHeat(t(filtadjCorClean),t(filtadjPClean),colorer(11))+scale_fill_gradientn(colors=colorer(11),breaks=c(-0.8,0,0.8),labels=c(-0.8,0,0.8),limits=c(-0.8,0.8))+scale_color_manual(values=c("black",NA),labels=c("FDR<0.05",""),name="Significance")
-ggsave(here("Plots","discovery_cleaned_metadata_heatmap.pdf"),width = 15,height = 8)
 
 #second cleaned-up version for paper
 removevars=c(11,6,10,9,8)
@@ -300,6 +280,9 @@ paste("p.MM.", modNames[modOrder[mod]], sep=""))
 # Order the genes in the geneInfo variable first by module color, then by geneTraitSignificance
 geneOrder = order(geneInfo0$moduleColor, -abs(geneInfo0$GS_NANCYscore.weight));
 geneInfo = geneInfo0[geneOrder, ]
+
+#rename the colors to module numbers
+geneInfo$moduleColor=namekey[match(geneInfo$moduleColor,namekey[,1]),2]
 write.csv(geneInfo, file = here("Data","Generated","discovery_WGCNAgeneInfo.csv"), row.names=F)
 
 #write a table of the module correlations with clinical traits
@@ -309,7 +292,6 @@ padjcopy=padj
 colnames(padjcopy)=paste0(colnames(moduleTraitPvalue),"_FDR_Pvalue")
 modcorframe=cbind(moduleTraitCor,moduleTraitPvalue,padjcopy)
 modcorframe=modcorframe[order(rownames(modcorframe)),order(colnames(modcorframe))]
-rownames(modcorframe)=substring(rownames(modcorframe),3)
 write.csv(modcorframe,file=here("Data","Generated","discovery_WGCNAmodInfo.csv"))
 ```
 
@@ -365,7 +347,11 @@ for(i in 1:nrow(fpdat)){
 
 ```
 
-```{r echo=F, code=readLines("Scripts/plot_module_networks.R")}
+```{r echo=F}
+if(netplots==TRUE){
+  source(here("Scripts","plot_module_networks.R"))
+}
+
 ```
 
 
