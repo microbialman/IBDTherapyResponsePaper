@@ -48,7 +48,7 @@ theme_set(theme_cowplot())
 #clean_expr_dat=t(mapped)
 #write.table(clean_expr_dat,"Arjis_2009_cleaned_expr_dat.tsv",sep="\t")
 
-repdat=read.table(here("Data","Input","Arijs_2009_cleaned_expr_dat.tsv"),sep="\t")
+repdat=read.table(here("Data","Input","Arijs_2009_cleaned_expr_dat.tsv.gz"),sep="\t")
 
 #### the code below was originally used to generate the metadata table ####
 
@@ -74,7 +74,7 @@ repdat=read.table(here("Data","Input","Arijs_2009_cleaned_expr_dat.tsv"),sep="\t
 #)
 #write.table(meta,"Arijs_2009_cleaned_meta_table.tsv",sep="\t")
 
-metadat=read.table(here("Data","Input","Arijs_2009_cleaned_meta_table.tsv"),sep="\t")
+metadat=read.table(here("Data","Input","Arijs_2009_cleaned_meta_table.tsv.gz"),sep="\t")
 metadat=data.frame(lapply(metadat,factor))
 metadat=rowNamer(metadat)
 metadat=metadat[match(rownames(metadat),colnames(repdat)),]
@@ -137,7 +137,7 @@ write.csv(RepMEs[which(metadat$PostTreatment==0),],here("Data","Generated","Arij
 
 ```{r, fig.height=15, fig.width=10,results="asis",echo=F}
 #get the color mapping from the name
-namekey=read.csv(here("Data","Input","module_number_key.csv"),header=F)
+namekey=read.csv(here("Data","Input","module_number_key.csv.gz"),header=F)
 
 preMEs=RepMEs[which(metadat$PostTreatment==0),]
 preMeta=metadat[which(metadat$PostTreatment==0),]

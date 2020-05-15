@@ -32,7 +32,7 @@ set.seed(666)
 theme_set(theme_cowplot())
 
 #load in tpm counts
-tpmcounts=read.csv(here("Data","Input","discovery_tpm_counts.csv"))
+tpmcounts=read.csv(here("Data","Input","discovery_tpm_counts.csv.gz"))
 
 #set rownames to gene_id and remove non-count columns (columns 4 onwards)
 tpmformat=tpmcounts[,4:ncol(tpmcounts)]
@@ -58,7 +58,7 @@ TPM counts were then log transformed *(log(x+1))* for further analyses.
 
 ```{r echo=F}
 #remove samples ommited from DE analysis due to failing QC
-samples2remove=read.csv(here("Data","Input","failed_samples.csv"))
+samples2remove=read.csv(here("Data","Input","failed_samples.csv.gz"))
 tpm=tpm[!rownames(tpm)%in%samples2remove[,1],]
 
 ```
@@ -69,7 +69,7 @@ Removed samples flagged for omission after failing QC in DE analysis, data now c
 Heirarchical clustering plot to check for outliers and metadata associations.
 
 ```{r,fig.width=10,fig.height=4,echo=FALSE}
-traitData = read.csv(here("Data","Input","discovery_metadata.csv"),stringsAsFactors = T)
+traitData = read.csv(here("Data","Input","discovery_metadata.csv.gz"),stringsAsFactors = T)
 #subset metadata to remaning samples and put in matching order
 traitData=traitData[match(rownames(tpm),traitData$sample_ID..patient.),]
 
@@ -192,7 +192,7 @@ rownames(MEs)=rownames(traitData)
 write.csv(MEs,here("Data","Generated","discovery_MEs.csv"))
 
 #rename the MEs from their color names to the numbers used int he manuscript
-namekey=read.csv(here("Data","Input","module_number_key.csv"),header=F)
+namekey=read.csv(here("Data","Input","module_number_key.csv.gz"),header=F)
 colnames(MEs)=gsub("ME","",colnames(MEs))
 colnames(MEs)=namekey[match(colnames(MEs),namekey[,1]),2]
 

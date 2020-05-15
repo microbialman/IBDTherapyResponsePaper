@@ -27,7 +27,7 @@ Pathway analysis was carried out on the combined sets of genes within modules as
 
 ```{r mod_paths, include=F}
 #genes-of-interest: extracting genes contained in WGCNA modules of interest
-modules<-read.csv(here("Data","Input","module_gene_mapping.csv"), header = TRUE, row.names=1) #read in genes-to-module assignments
+modules<-read.csv(here("Data","Input","module_gene_mapping.csv.gz"), header = TRUE, row.names=1) #read in genes-to-module assignments
 modules<-modules[,c(1,2)]
 stromal<-modules %>% dplyr::filter(moduleColor==c("M1","M2","M3","M4","M9","M10"))
 granulocyte<-modules %>% dplyr::filter(moduleColor==c("M5","M7"))
@@ -110,7 +110,7 @@ Differential expression analysis was performed on RNA from sorted neutrophils an
 
 ```{r, include=F}
 #########neutrophil-specific pathways############
-MoverN<-read.csv(here("Data","Input","differential_expression_results_sorted_MNPs_vs_neutrophs.csv"), header=T)# reading in DESeq2 output of neutrophil-MNP differential gene expression
+MoverN<-read.csv(here("Data","Input","differential_expression_results_sorted_MNPs_vs_neutrophs.csv.gz"), header=T)# reading in DESeq2 output of neutrophil-MNP differential gene expression
 
 #filter for Padj<0.05 and |log2FC| 
 Nt<-MoverN[MoverN[,8]<0.05,]

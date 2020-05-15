@@ -47,7 +47,7 @@ theme_set(theme_cowplot())
 #clean_expr_dat=t(mapped)
 #write.table(clean_expr_dat,"cleaned_expr_dat.tsv",sep="\t")
 
-repdat=read.table(here("Data","Input","Arijs_2018_cleaned_expr_dat.tsv"), sep="\t")
+repdat=read.table(here("Data","Input","Arijs_2018_cleaned_expr_dat.tsv.gz"), sep="\t")
 colnames(repdat)=lapply(strsplit(colnames(repdat),"_"),"[[",1)
 
 #### Original code to generate the metadata table ####
@@ -58,7 +58,7 @@ colnames(repdat)=lapply(strsplit(colnames(repdat),"_"),"[[",1)
 #metasmall=geometa[,c(1,2,36,37,38,39,40)]
 #write.table(metasmall,"cleaned_meta_table.tsv",sep="\t")
 
-metadat=read.table(here("Data","Input","Arijs_2018_cleaned_meta_table.tsv"),sep="\t")
+metadat=read.table(here("Data","Input","Arijs_2018_cleaned_meta_table.tsv.gz"),sep="\t")
 metadat=data.frame(lapply(metadat,factor))
 rownames(metadat)=metadat$geo_accession
 metadat=metadat[match(rownames(metadat),colnames(repdat)),]
@@ -160,7 +160,7 @@ plotspair=list()
 ps=c()
 
 #get the color mapping from the name
-namekey=read.csv(here("Data","Input","module_number_key.csv"),header=F)
+namekey=read.csv(here("Data","Input","module_number_key.csv.gz"),header=F)
 
 for(i in 1:ncol(RepMEs)){
   me=RepMEs[,i]

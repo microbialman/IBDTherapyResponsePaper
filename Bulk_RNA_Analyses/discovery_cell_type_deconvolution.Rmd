@@ -33,7 +33,7 @@ if(!file.exists(here("Data","Generated","discovery_xCell_Scores.txt"))){
 #load in the RNAseq
 rnadat=data.frame(readRDS(here::here("Data","Generated","discovery_filtered_tpm.Rds")))
 #rename the cols
-namemap=read.csv(here::here("Data","Input","discovery_tpm_counts.csv"),header=T) 
+namemap=read.csv(here::here("Data","Input","discovery_tpm_counts.csv.gz"),header=T) 
 namemap=namemap[,c(1,2)]
 namesvect=namemap$gene_name
 names(namesvect)=namemap$gene_id
@@ -46,7 +46,7 @@ xcel=xCellAnalysis(t(rnadat),rnaseq = T, file.name = here("Data","Generated","di
 #read in files
 xcellin=read_delim(here("Data","Generated","discovery_xCell_Scores.txt"),"\t") %>% t()
 MEs=read_delim(here("Data","Generated","discovery_MEs.csv"),",")
-meta=read_delim(here("Data","Input","discovery_metadata.csv"),",") %>% filter(`sample_ID (patient)`%in%MEs$X1)
+meta=read_delim(here("Data","Input","discovery_metadata.csv.gz"),",") %>% filter(`sample_ID (patient)`%in%MEs$X1)
 
 xcel=xcellin
 colnames(xcel)=xcel[1,]
@@ -60,7 +60,7 @@ MEs = MEs %>% arrange(match(MEs$X1,meta$`sample_ID (patient)`))
 filtxcel=xcel[,-which(colSums(xcel==0)>(nrow(xcel)*0.75))]
 
 #rename MEs to the paper numbers
-namekey=read.csv(here("Data","Input","module_number_key.csv"),header=F)
+namekey=read.csv(here("Data","Input","module_number_key.csv.gz"),header=F)
 colnames(MEs)=gsub("ME","",colnames(MEs))
 colnames(MEs)=namekey[match(colnames(MEs),namekey[,1]),2]
 
