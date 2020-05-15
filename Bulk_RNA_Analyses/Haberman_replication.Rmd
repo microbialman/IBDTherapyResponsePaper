@@ -1,0 +1,153 @@
+---
+title: "Replication of WGCNA Modulesin Haberman data"
+output: html_document
+editor_options: 
+chunk_output_type: console
+---
+
+# Load in the replication data
+
+```{r echo=FALSE}
+library(here)
+#load BioFunk
+source("~/devel/Useful_Scripts/BioFunk.R")
+suppressPackageStartupMessages(library(hablar))
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(ggbeeswarm))
+suppressPackageStartupMessages(library(ggpubr))
+library(knitr)
+#load WGCNA
+suppressPackageStartupMessages(library(WGCNA))
+allowWGCNAThreads()
+options(stringsAsFactors = FALSE)
+suppressPackageStartupMessages(library("GEOquery"))
+suppressPackageStartupMessages(library("affy"))
+set.seed(666)
+
+theme_set(theme_cowplot())
+
+#### Code used to generate the expression file ####
+
+#ID is GSE109142
+#read in the raw data, this table was merged from the per-sample files on the GEO website
+#repdat=read.table("merged_GSE109142.txt",header=T,sep="\t",row.names=1)
+
+#read in the metadata, downloaded from GEO
+#metadat=data.frame(getGEO(filename="GSE109142_series_matrix.txt",getGPL = F))
+#reformat names and make same order as gene exp data
+#metadat$sampnames=unlist(lapply(strsplit(as.character(metadat$title)," "),"[[",1))
+#metadat=metadat[match(colnames(repdat),rownames(metadat)),]
+#sampnames=rownames(metadat)
+
+#drop useless columns
+#metadat=metadat[,c(1,48:59)]
+##metadat[metadat=="unknown"]=NA
+#metadat[metadat=="NA"]=NA
+#metadat = metadat %>% retype() %>% data.frame()
+#fs=c(4,5,7,9,10,12,13)
+#for(i in fs){
+# metadat[,i]=factor(metadat[,i])
+#}
+#rownames(metadat)=sampnames
+#remove controls
+#rem=which(metadat$diagnosis.ch1=="Control")
+#metadat=metadat[-rem,]
+#repdat=repdat[,-rem]
+
+#write.csv(repdat,"Haberman_no_controls_gene_exp_tpm.csv")
+#write.csv(metadat,"Haberman_no_controls_cleaned_meta.csv")
+
+repdat=read.csv(here("Data","Input","Haberman_no_controls_gene_exp_tpm.csv.gz"),row.names = 1)
+metadat=read.csv(here("Data","Input","Haberman_no_controls_cleaned_meta.csv.gz"),row.names = 1)
+
+```
+
+RNASeq data was downloaded as pre-processed TPMs (from Kalisto) for the Haberman et al. 2019 Nature Comms. paper (GEO:GSE109142).
+This contained **`r nrow(metadat)`** samples from pediatric UC patients and included **`r nrow(repdat)`** genes (some filtering in GEO upload).
+
+# Map to modules from discovery data
+
+```{r, echo=FALSE}
+#our module data
+moddefs=read.csv(here("Data","Generated","discovery_WGCNAgeneInfo.csv"))
+modcors=read.csv(here("Data","Generated","discovery_WGCNAmodInfo.csv"))
+moddefs=moddefs[-which(moddefs$moduleColor=="unassigned"),]
+
+#list of modules significantly associated with NANCY score
+signancy=modcors[modcors$NANCYscore_Pvalue_FDR_Pvalue<0.05,]
+
+#match replication data and module defs
+matchdef=moddefs[moddefs$geneName%in%rownames(repdat),]
+matchrep=repdat[match(matchdef$geneName,rownames(repdat)),]
+
+#calculate the module coverages in the replication data set (gene % observed)
+modcov=data.frame(Original=table(moddefs$moduleColor),Replication=table(matchdef$moduleColor))
+modcov=modcov[,-3]
+colnames(modcov)=c("Module","Original Size (No. Genes)","Replication Size (No. Genes)")
+modcov$Percentage=(modcov[,3]/modcov[,2])*100
+modcov$NANCYsig=ifelse(modcov$Module%in%signancy$X,1,0)
+colnames(modcov)[ncol(modcov)]="FDR Sig. with NANCY Score in discovery cohort."
+modcov=modcov[order(modcov$Percentage,decreasing = T),]
+
+```
+
+In our unbiased analysis we had **`r nrow(moddefs)`** genes assigned to a module (excluding the genes assigned to grey).
+From these, **`r nrow(matchdef)`** were also in the replication data set (**`r round((nrow(matchdef)/nrow(moddefs))*100)`%**).
+
+## Module overlaps
+
+`r kable(modcov,format="markdown",row.names=F)`
+
+# Module eigengene comparisons pre-treatment between responders and non-responders
+
+We extracted patients receiving corticosteroid therapy (via either IV or oral administration) from the Haberman study and compared the module eigengene values pre-treatment between the cases and controls. 
+
+```{r, fig.height=15, fig.width=10,results="asis",echo=F}
+#generate the module eigengenes
+RepMEList = moduleEigengenes(t(matchrep), colors = matchdef$moduleColor, excludeGrey = TRUE,)
+RepMEs = RepMEList$eigengenes
+colnames(RepMEs)=gsub("ME","",colnames(RepMEs))
+
+#remove non NANCY associated MEs
+RepMEs = RepMEs[,colnames(RepMEs)%in%signancy$X]
+
+csMEs=RepMEs[which(metadat$initial.treatment.ch1!="5ASA"),]
+csMeta=metadat[which(metadat$initial.treatment.ch1!="5ASA"),]
+
+colnames(csMeta)=gsub(".ch1","",colnames(csMeta))
+
+#get the color mapping from the name
+namekey=read.csv(here("Data","Input","module_number_key.csv.gz"),header=F)
+
+csplots=list()
+ps=c()
+for(i in 1:ncol(csMEs)){
+  me=csMEs[,i]
+  mename=colnames(RepMEs)[i]
+  groups=csMeta$week.4.remission
+  namekey[namekey[,2]==mename,1]
+  colorname=namekey[namekey[,2]==mename,1]
+  df=data.frame("Eigengene"=me,"Response"=groups)
+  pl=ggplot(df,aes(x=Response,y=Eigengene,fill=colorname))+geom_boxplot()+geom_quasirandom()+
+    ylab(paste0(mename))+scale_fill_manual(values=colorname)+guides(fill=F)
+  csplots[[mename]]=pl
+  test=wilcox.test(me~groups)
+  ps=c(ps,test$p.value)
+}
+
+adjp=p.adjust(ps,method="fdr")
+siglist=csplots[adjp<0.05]
+
+cat("**Wilcox results responders vs. non-responders corticosteroids (All)**")
+psdf=data.frame("Module"=colnames(csMEs),"Wilcox_p"=ps,"Wilcox_FDR_p"=adjp)
+psdf=psdf[order(adjp),]
+kable(psdf)
+
+write.csv(psdf,here("Data","Generated","Haberman_cs_repsonse_wilcox_module_eigengenes.csv"))
+
+c("**Boxplots corticosteroid significatnly different (FDR p<0.05)**")
+plot_grid(plotlist = siglist[psdf$Module[psdf$Wilcox_FDR_p<0.05]], ncol=3)
+ggsave(here("Plots","Haberman_corticosteroids_signif_diff_by_response_boxplots.pdf"),width=10,height=15)
+
+```
+

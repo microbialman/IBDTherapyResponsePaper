@@ -1,0 +1,121 @@
+---
+title: "Gene-level prediction of response in the anti-TNF and corticosteroid datasets"
+output: html_document
+editor_options: 
+chunk_output_type: console
+---
+
+# Load in the data
+
+```{r echo=FALSE}
+library(here)
+library(tidyverse)
+library(magrittr)
+library(pROC)
+library(ggrepel)
+library(ggpubr)
+library(ggbeeswarm)
+
+#read in the gene and metadata for the arijs 2009 and haberman datasets
+#arjis
+arj=read.csv(here("Data","Input","Arijs_2009_cleaned_expr_dat.tsv.gz"),sep="\t",header=T)
+amet=read.csv(here("Data","Input","Arijs_2009_cleaned_meta_table.tsv.gz"),sep="\t",header=T) %>% filter(Control==0,PostTreatment==0)
+arj=arj[,amet$GID]
+
+#haberman
+hab=read.csv(here("Data","Input","Haberman_no_controls_gene_exp_tpm.csv.gz"),header=T,row.names=1)
+hmet=read.csv(here("Data","Input","Haberman_no_controls_cleaned_meta.csv.gz"),header=T) %>% filter(initial.treatment.ch1!="5ASA")
+hmet$response=ifelse(hmet$week.4.remission.ch1=="Yes",1,0)
+hab=hab[,hmet$X]
+
+#remove genes all with zero value (0.01 in the pre normalised table)
+hab=hab[-which(rowSums(hab==0.01)==ncol(hab)),]
+
+#read in the ME definitions
+moddat=read.csv(here("Data","Generated","discovery_WGCNAgeneInfo.csv"),sep=",")
+
+#rename arjis genes
+arj=arj[rownames(arj)%in%moddat$geneid,]
+rownames(arj)=moddat$geneName[match(rownames(arj),moddat$geneid)]
+
+#subset to just the genes in modules
+arj=arj[rownames(arj)%in%moddat$geneName,]
+hab=hab[rownames(hab)%in%moddat$geneName,]
+
+overlap=which(rownames(arj)%in%rownames(hab))
+
+```
+
+After matching across the discovery, Arijs 2009, and Haberman datasets there was a total of **`r length(overlap)`** genes observed across all three.
+
+# Gauge gene abiltiies to predict therpy response pre-treatment using logistic regression
+
+```{r cache=T, echo=F, include=F}
+#function to do gene wise prediction
+preds=function(medefs,rna,response){
+  gene=rownames(rna)
+  module=medefs$moduleColor[match(gene,medefs$geneName)]
+  p=c()
+  co=c()
+  auc=c()
+  for(i in 1:nrow(rna)){
+    Gene=as.numeric(rna[i,])
+    logit=glm(response~Gene,family="binomial")
+    sl=summary(logit)
+    p=c(p,sl$coefficients[2,4])
+    co=c(co,sl$coefficients[2,1])
+    pred=predict(logit,type = "response")
+    rc=roc(response~pred,quiet=T)
+    auc=c(auc,rc$auc)
+  }
+  results=data.frame(Gene=gene,Module=module,p=p,p.adj=p.adjust(p,method="fdr"),coef=co,AUC=auc)
+  return(results[order(results$AUC,decreasing = T),])
+}
+
+#arijs gene wise
+ag=preds(moddat,arj,amet$aTNF_Response)
+write.csv(ag,here("Data","Generated","Arijs_2009_gene_wise_response_auc_all_module_genes.csv"),row.names = F)
+
+#haber gene wise
+hg=preds(moddat,hab,hmet$response)
+write.csv(hg,here("Data","Generated","Haberman_gene_wise_response_auc_all_module_genes.csv"),row.names = F)
+
+#combined
+comb=merge(ag,hg,by="Gene",suffixes=c("A","H"))
+comb$ARank=rank(comb$AUCA)
+comb$HRank=rank(comb$AUCH)
+comb$RankSum=comb$ARank+comb$HRank
+comb=comb[order(comb$RankSum,decreasing = T),]
+write.csv(comb,here("Data","Generated","Combined_gene_wise_response_auc_all_module_genes.csv"),row.names = F)
+
+
+colmapper=c("M5"="orange","M4"="paleturquoise")
+
+comb$GeneLabel=ifelse(comb$ModuleA%in%c("M4","M5"),as.character(comb$Gene),NA)
+comb$PCol=ifelse(comb$ModuleA%in%c("M4","M5"),colmapper[comb$ModuleA],NA)
+comb$PCol2=ifelse(comb$ModuleA%in%c("orange","paleturquoise"),"black",NA)
+```
+
+## Scatter plot
+
+```{r scatterplot, fig.width=10, fig.height=10}
+ggplot(comb,aes(x=AUCA,y=AUCH))+geom_point(size=0.75)+geom_point(color=as.character(comb$PCol2),size=2.25)+geom_point(color=as.character(comb$PCol),size=2)+geom_smooth(method="lm",se=F,col="red",lty=2)+xlab("AUC Arjis et al. 2009")+ylab("AUC Habermann et al.")+geom_label_repel(aes(label=GeneLabel),fill=comb$PCol)+theme_classic()
+
+ggsave(here("Plots","all_genes_auc_M4_M5_labelled.pdf"),height=10,width=10)
+```
+
+## Violin plot
+
+```{r violinplot,fig.height=5, fig.width=6}
+comb %<>% add_column(RankMod=ifelse(comb$ModuleA%in%c("M4","M5"),as.character(comb$ModuleA),"other")) %>% mutate(RankMod=factor(RankMod,levels=c("M5","M4","other")))
+ggplot(comb,aes(x=RankMod,y=RankSum,fill=RankMod))+geom_violin()+theme_classic()+ylab("AUC Rank Arjis + AUC Rank Haberman")+xlab("Gene Module Assignment")+
+  scale_fill_manual(values=c("orange","paleturquoise","lightgrey"))+stat_compare_means(aes(x=RankMod),comparisons = list(c(2,3),c(1,3)))+guides(fill=F)
+ggsave(here("Plots","auc_rank_violinplot.pdf"),height = 10,width = 10)
+
+```
+
+
+
+
+
+

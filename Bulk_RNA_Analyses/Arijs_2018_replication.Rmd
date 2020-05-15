@@ -7,7 +7,7 @@ chunk_output_type: console
 
 # Load in the replication data
 
-```{r echo=FALSE}
+```{r echo=FALSE, include=F}
 #load BioFunk
 source("~/devel/Useful_Scripts/BioFunk.R")
 library(here)
@@ -73,7 +73,7 @@ Microarray data was normalised using the robust multi-array average (RMA) measur
 
 # Map to the modules from the discovery dataset
 
-```{r, echo=FALSE}
+```{r, echo=FALSE, include=F}
 #our module data
 moddefs=read.csv(here("Data","Generated","discovery_WGCNAgeneInfo.csv"))
 modcors=read.csv(here("Data","Generated","discovery_WGCNAmodInfo.csv"))
