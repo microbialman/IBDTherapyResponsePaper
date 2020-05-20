@@ -22,6 +22,7 @@ source(here("Scripts","BioFunk.R"))
 library(pheatmap)
 library(biomaRt,quietly = T)
 library(knitr,quietly = T)
+library(ggpubr)
 #load WGCNA
 suppressPackageStartupMessages(library(WGCNA))
 options(stringsAsFactors = FALSE)
@@ -238,6 +239,44 @@ write.table(NANCY,here("Data","Generated","discovery_NANCY_module_correlations.t
 ```
 
 It is clear that the modules are largely correlating with differences in inflammation status. Especially given the FDR adjusted p-values. Nicely, the medication traits are showing opposing effects. The only traits with no nominally significant module associations were **`r names(nonsigcols)`**. The only modules with no significant associations were **`r names(nonsigrows)`**.
+
+## Module correlations with metadata within IBD patients only
+
+As the controls introduce a distinct clustering, we aimed to see if the correlation with inflammation severity (NANCY) is maintained within IBD paitients alone.
+
+```{r fig.width=10,fig.height=8, results='asis',echo=FALSE, include=T}
+
+#correlate MEs vs numerical versions of traits
+#remove CRC and control vs ibd columns and CRC samples
+IBDnumTraitData = numTraitData[numTraitData$Combined==2,-c(14,17)]
+IBDmoduleTraitCor = cor(MEs[numTraitData$Combined==2,], IBDnumTraitData, use = "p")
+IBDmoduleTraitPvalue = corPvalueStudent(IBDmoduleTraitCor, nrow(IBDnumTraitData))
+IBDpadj=matrix(p.adjust(IBDmoduleTraitPvalue,method="fdr"),ncol=15,byrow = F)
+colnames(IBDpadj)=colnames(IBDnumTraitData)
+rownames(IBDpadj)=rownames(IBDmoduleTraitPvalue)
+#adjust p significant
+IBDnonsigarows=which(rowSums(IBDpadj<0.05)==0)
+IBDnonsigacols=which(colSums(IBDpadj<0.05)==0)
+IBDfiltadjCor=IBDmoduleTraitCor[-IBDnonsigarows,-IBDnonsigacols]
+IBDfiltadjP=IBDpadj[-IBDnonsigarows,-IBDnonsigacols]
+
+colnames(IBDpadj)[-IBDnonsigacols]
+cat("FDR significant correlations only observed with NANCY score")
+kable(data.frame(Cor=IBDfiltadjCor,AdjP=IBDfiltadjP))
+
+#we have less power in this comparison due to the smaller sample size so also check to see if correlations in general match across the comparisons with IBD+CRC or with CRC only
+ibdnancycors = IBDmoduleTraitCor[,"NANCYscore"]
+allnancycors = moduleTraitCor[,"NANCYscore"]
+modcols = namekey[match(names(ibdnancycors),namekey[,2]),1]
+modnames = factor(names(ibdnancycors),levels=names(ibdnancycors))
+modsig = ifelse(modnames%in%names(IBDfiltadjP),23,NA)
+qplot(x=ibdnancycors,y=allnancycors)+geom_point(size=6,aes(fill=modnames),shape=modsig)+geom_point(size=5,aes(fill=modnames),shape=21)+xlab("Module Correlation with NANCY Score - IBD Patient Samples Only")+ylab("Module Correlation with NANCY Score - All Samples")+stat_cor()+scale_fill_manual(values=modcols)+labs(fill="Module")
+
+ggsave(here("Plots","Module_NANCY_correlations_all_vs_IBD_only.pdf"),width=10,height=8,useDingbats=F)
+
+```
+
+In this smaller IBD only subset of the samples only the NANCY score retained FDR significant associations with 3 modules. But looking more broadly across modules we can see that, even without the control samples, the IBD patient expression of modules is correlated with NANCY score albeit with a lower magnitude correlation given the removal of the uninflammed controls.
 
 ```{r echo=FALSE}
 # Write Module Stats to Files
