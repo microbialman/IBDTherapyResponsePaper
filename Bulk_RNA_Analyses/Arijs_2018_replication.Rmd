@@ -201,3 +201,64 @@ plot(plotspair$M5)
 ggsave(here("Plots","Arijs_M5_pairwise.pdf"),width=12,height =8)
 
 ```
+
+# For regimens that were significant, differences in M4 and M5 effect sizes by response
+
+## aTNF
+
+```{r effsize_M4_M5, include=T}
+#atnf
+M4=RepMEs$M4
+M5=RepMEs$M5
+response=repmet$treatment_response
+reg=repmet$induction.therapy_maintenance.therapy.ch1
+
+ne=length(which(response==0&reg=="IFX"))
+nc=length(which(response==1&reg=="IFX"))
+
+me4=mean(M4[response==0&reg=="IFX"])
+mc4=mean(M4[response==1&reg=="IFX"])
+
+sde4=sd(M4[response==0&reg=="IFX"])
+sdc4=sd(M4[response==1&reg=="IFX"])
+
+me5=mean(M5[response==0&reg=="IFX"])
+mc5=mean(M5[response==1&reg=="IFX"])
+
+sde5=sd(M5[response==0&reg=="IFX"])
+sdc5=sd(M5[response==1&reg=="IFX"])
+
+efftab=rbind(c(ne,me4,sde4,nc,mc4,sdc4),c(ne,me5,sde5,nc,mc5,sdc5))
+colnames(efftab)=c("N Non","Mean Non","SD Non","N Resp","Mean Resp","SD Resp")
+rownames(efftab)=c("M4","M5")
+
+kable(efftab)
+
+```
+
+## vdz_vdz4w
+
+```{r effsize_M4_M5_vdz_vdz4w, include=T}
+#vdz_vdz4w
+ne=length(which(response==0&reg=="vdz_vdz4w"))
+nc=length(which(response==1&reg=="vdz_vdz4w"))
+
+me4=mean(M4[response==0&reg=="vdz_vdz4w"])
+mc4=mean(M4[response==1&reg=="vdz_vdz4w"])
+
+sde4=sd(M4[response==0&reg=="vdz_vdz4w"])
+sdc4=sd(M4[response==1&reg=="vdz_vdz4w"])
+
+me5=mean(M5[response==0&reg=="vdz_vdz4w"])
+mc5=mean(M5[response==1&reg=="vdz_vdz4w"])
+
+sde5=sd(M5[response==0&reg=="vdz_vdz4w"])
+sdc5=sd(M5[response==1&reg=="vdz_vdz4w"])
+
+efftab=rbind(c(ne,me4,sde4,nc,mc4,sdc4),c(ne,me5,sde5,nc,mc5,sdc5))
+colnames(efftab)=c("N Non","Mean Non","SD Non","N Resp","Mean Resp","SD Resp")
+rownames(efftab)=c("M4","M5")
+
+kable(efftab)
+
+```

@@ -1,0 +1,71 @@
+---
+title: "Meta-analysis of M4 and M5 levels in therapy response across replication datasets"
+editor_options: null
+output:
+  html_document: default
+  pdf_document: default
+chunk_output_type: console
+---
+```{r echo=FALSE, message=F, warning=F}
+library(meta)
+suppressPackageStartupMessages(library(ggpubr))
+library(here)
+library(knitr)
+library(cowplot)
+theme_set(theme_cowplot())
+```
+
+# Data
+
+Data is taken from the differences in M4 and M5 levels between responders and non-responders to a-TNF (Arijs 2009 & 2018), coritcosteroids (Haberman) or anti-integrin (Arijs 2018, 4w regimen).
+
+```{r include=T, echo=F}
+#create a data table with the values from the individual markdown reports for each dataset
+dataset=c("Arijs 2009 anti-TNF","Arijs 2018 anti-TNF","Arijs 2018 anti-integrin (4w)","Haberman corticosteroids")
+#number of non-responders
+ne=c(33,15,12,78)
+#mean non responders m4 and m5
+me4=c(0.0750572,0.0252617,0.0762051,0.0285287)
+me5=c(0.0802093,0.0585664,0.0768667,0.0242437)
+#sd non responders m4 and m5
+sde4=c(0.0788216,0.0569855,0.0854229,0.0691169)
+sde5=c(0.0728374,0.0571588,0.0922738,0.0613344)
+#number of responders
+nc=c(28,8,8,75)
+#mean responders m4 and m5
+mc4=c(-0.0146137,-0.0091981,-0.0098277,-0.0013116)
+mc5=c(-0.0154797,0.0115497,0.0000729,0.0019530)
+#sd responders m4 and m5
+sdc4=c(0.0342959,0.0400141,0.0399306,0.0706151)
+sdc5=c(0.0421826,0.0460370,0.0508873,0.0853866)
+
+df=data.frame(Dataset=dataset,Nnon=ne,Mean4non=me4,Mean5non=me5,SD4non=sde4,SD5non=sde5,Nresp=nc,Mean4resp=mc4,Mean5resp=mc5,SD4resp=sdc4,SD5resp=sdc5)
+
+kable(df)
+```
+
+# Meta-analysis M4
+
+```{r, include=F}
+m4meta=metacont(n.e = Nnon, mean.e = Mean4non, sd.e = SD4non, n.c = Nresp, mean.c = Mean4resp, sd.c = SD4resp, studlab = Dataset, data=df, sm="SMD", exact.smd = T, comb.fixed=F, comb.random = T, title = "Meta-analysis of differences in M4 eigengene levels in responders and non-responders prior to treatment.")
+```
+
+```{r, fig.width=10}
+print(m4meta)
+
+forest(m4meta, studlab = T, col.diamond = "paleturquoise")
+```
+
+# Meta-analysis M5
+
+```{r, include=F}
+m5meta=metacont(n.e = Nnon, mean.e = Mean5non, sd.e = SD5non, n.c = Nresp, mean.c = Mean5resp, sd.c = SD5resp, studlab = Dataset, data=df, sm="SMD", exact.smd = T, comb.fixed=F, comb.random = T, title = "Meta-analysis of differences in M5 eigengene levels in responders and non-responders prior to treatment.")
+```
+
+```{r, fig.width=10}
+print(m5meta)
+
+forest(m5meta, studlab = T, col.diamond = "orange")
+```
+
+
