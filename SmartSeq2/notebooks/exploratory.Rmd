@@ -1,0 +1,343 @@
+---
+title: "Exploratory analysis"
+header-includes: #allows you to add in your own Latex packages
+- \usepackage{float} #use the 'float' package
+- \floatplacement{figure}{H} #make every figure with caption = h
+output:
+  pdf_document:
+    fig_caption: true
+    keep_tex: true
+    latex_engine: xelatex
+  html_document:
+    df_print: paged
+urlcolor: blue
+---
+
+```{r exp-setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(cache = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(out.extra = '')
+```
+
+
+```{r include=FALSE, echo=FALSE}
+library(ggplot2)
+library(gridExtra)
+library(DESeq2)
+library(reshape2)
+library(dplyr)
+library(vsn)
+library(gplots)
+library(RColorBrewer)
+library(ngsfoo)
+source("rnaseq.config.R")
+```
+
+
+```{r include=FALSE, echo=FALSE}
+
+# load in the count data
+data = fetch_DataFrame("select * from featurecounts_counts", scseq_db)
+data <- data[,!colnames(data) %in% exclude]
+
+# load in the sample information
+statement = 'select * from sample_information'
+sample_info = fetch_DataFrame(statement, scseq_db)
+
+# add grouping information
+sample_info <- setGroup(sample_info,"experiment_group",experiment_groups)
+sample_info <- setGroup(sample_info,"plot_group",plot_groups)
+
+# construct a DESeq2 object
+rownames(data) <- data$gene_id
+data$gene_id <- NULL
+
+# define a data frame with information about the samples (i.e the columns of the countData)
+columnData <- as.data.frame(unclass(sample_info))
+rownames(columnData) <- columnData$sample_id
+
+columnData$biosample <- as.factor(columnData$biosample)
+
+# reorder the columnData to match the count matrix:
+columnData <- columnData[colnames(data),]
+
+# build a DESeqDataSet from the count matrix
+# note that the summed salmon numReads are simply rounded
+# this is identical to the procedeure performed
+# by tximport + DESeqDataSetFromTximport.
+dds <- DESeqDataSetFromMatrix(countData=round(data), 
+                              colData= columnData, 
+                              design = ~experiment_group)
+# estimate the size factions
+#controlGenes <- rownames(data) %in% hkgs
+#print(head(controlGenes))
+dds <- estimateSizeFactors(dds) #, controlGenes=controlGenes)
+
+# apply VST
+vstMat <- assay(varianceStabilizingTransformation(dds, blind=TRUE, fitType="local"))
+```
+
+# Exploratory data analysis {#explore}
+
+## Introduction
+
+This section of the report contains various exploratory analyses of the differences between the samples.
+
+## Data normalisation and transformation
+
+The [DESeq2](https://www.bioconductor.org/packages/devel/bioc/html/DESeq2.html) package was used to prepare normalised, variance-stabilised gene-expression values (from read counts generated with [Salmon](https://combine-lab.github.io/salmon/) for downstream analysis.
+
+
+## Number of counts and genes detected per-sample
+
+```{r counts-vs-genes, fig.cap='Numbers of reads and counts by sample', fig.height=3, fig.width=8,  echo=FALSE, message=FALSE}
+# get per sample counts
+
+d <- as.data.frame((apply(data,2,sum)))
+
+colnames(d) <- "counts"
+
+# get no. genes detected
+d$no_genes <- (apply(data,2,function(x) length(x[x>=1])))
+
+d$id <- factor(rownames(d), levels=rownames(d)[order(d$counts)])
+d$group <- columnData[rownames(d),plot_color]
+d$label <- columnData[rownames(d),plot_label]
+d$shape <- columnData[rownames(d),plot_shape]
+
+gp <- ggplot(d,aes_string("counts","no_genes",color="group", shape="shape", label="label"))
+gp <- gp + geom_text(nudge_y=160,color="grey")
+gp <- gp + geom_point(size=4) + xlab("total read counts") + ylab("no. genes expressed")
+print(gp)
+
+```
+
+
+```{r exp-assess-norm, fig.cap='Variance stablizing transformation. Top: histograms of raw counts, middle: histograms of vst-transformed counts, bottom: relationship of standard deviation and expression level in vst-transformed data.', fig.height=6, fig.width=8,  echo=FALSE, message=FALSE}
+
+# assess the VST transformed normalised data:
+counts <- counts(dds)
+colnames(counts) <- dds$sample_id
+
+c_gp <- plotDensities(counts, columnData, "plot_group", "raw counts (log2)")
+vst_gp <- plotDensities(2^vstMat, columnData, "plot_group", "VST transformed, normalized counts")
+
+notAllZero <- (rowMeans(vstMat)> min(vstMat))
+sd_gp <- meanSdPlot(vstMat[notAllZero,], ylab="sd, vst",plot=F)
+
+gps <- list(c_gp$den,c_gp$bp, vst_gp$den, vst_gp$bp, sd_gp$gg)
+
+grid.arrange(grobs=gps, ncols=2, nrows=3)
+```
+
+\clearpage
+
+```{r echo=FALSE, message=FALSE,include=FALSE}
+
+# filter the vstMatrix
+lq <- quantile(vstMat,0.25)
+filteredVSTMat <- vstMat[apply(vstMat,1,function(x) sum(x[x>lq])>=nreplicates),]
+print(dim(filteredVSTMat))
+```
+
+## Inter-sample correlations
+
+The symmetrical heatmap shows the inter-sample pearson correlation co-efficients. The correlations were calculated using genes detected (above the 25^th^ expression quantile) in at least `r toString(nreplicates)` samples (n=`r toString(dim(filteredVSTMat)[1])`).
+
+```{r exp-cor, fig.cap='Inter-sample correlation heatmap.', fig.height=6, fig.width=6,  echo=FALSE, message=FALSE, eval=TRUE}
+
+cor_method = "pearson"
+
+m <- cor(filteredVSTMat, method=cor_method, use="all")
+
+l <- get_col(m)
+
+distance_method <- paste(cor_method,"correlation")
+plot_cor(m, mar=c(8,8))
+```
+
+\clearpage
+
+## Inter-sample distances
+
+The symmetrical heatmap shows the inter-sample manhattan distances.
+
+```{r exp-dist, fig.cap='Inter-sample distance heatmap.', fig.height=6, fig.width=6,  echo=FALSE, message=FALSE, eval=TRUE}
+
+dm <- dist(t(log2(filteredVSTMat+1)), method="manhattan", diag=T,
+                                      upper=T)
+
+l <- get_col(dm, palette = rev(brewer.pal(n=9,"YlOrRd")))
+distance_method <- "manhattan distance"
+
+plot_cor(as.matrix(dm), mar=c(8,8))
+```
+
+\clearpage
+
+## PCA of all samples by gene expression
+
+PCA analysis of samples based on genes detected (above the 25^th^ expression quantile) in at least `r toString(nreplicates)` samples (n=`r toString(dim(filteredVSTMat)[1])`).
+
+
+```{r exp-pca-exprs, fig.cap='Principle components analysis of samples based on expressed genes', fig.height=6, fig.width=10,  echo=FALSE, message=FALSE}
+pca <- prcomp(t(filteredVSTMat))
+
+gps <- ggplot_prcomp(pca, 
+             plots=list("A"=c("PC1","PC2"), 
+                        "B"=c("PC3","PC4"), 
+                        "C"=c("PC5","PC6")),
+             columnData, 
+             color=plot_color, 
+             shape=plot_shape,
+             label=plot_label,
+             size=2,
+             nudge_scale_factor=20)
+
+grid.arrange(grobs=gps,ncol=2)
+
+```
+
+
+```{r echo=FALSE, message=FALSE, include=FALSE}
+# get genes showing significant variation
+dds = DESeq(dds, test = "LRT", reduced = ~ 1)
+res <- data.frame(results(dds))
+
+print(dim(res))
+sigvar_genes <- rownames(res)[res$padj<0.1 & !is.na(res$padj)]
+sigVst <- vstMat[sigvar_genes,]
+dim(sigVst)
+
+```
+
+PCA analysis of samples based on `r toString(dim(sigVst)[1])` genes that show significant variation between the experimental conditions (DESeq, LRT, 10% FDR).
+
+
+```{r exp-pca-sig, fig.cap='Principle components analysis of samples based on genes with significantly variable expression between the experimental groups', fig.height=6, fig.width=10,  echo=FALSE, message=FALSE}
+pca <- prcomp(t(sigVst))
+
+gps <- ggplot_prcomp(pca, 
+             plots=list("A"=c("PC1","PC2"), 
+                        "B"=c("PC3","PC4"), 
+                        "C"=c("PC5","PC6")),
+             columnData, 
+             color=plot_color, 
+             shape=plot_shape,
+             label=plot_label,
+             size=2,
+             nudge_scale_factor=20)
+
+grid.arrange(grobs=gps,ncol=2)
+
+```
+
+
+\newpage
+
+## tSNE analysis of samples
+
+The projection is based on the expression of genes found to have significantly variable expression between the experimental groups (see above).
+
+```{r echo=FALSE, message=FALSE}
+require(Rtsne)
+tsne_out = Rtsne(t(filteredVSTMat), pca=T, perplexity=3)
+```
+
+
+```{r exp-tsne, fig.cap='tSNE projection of samples based genes with significantly variable expression between the experimental groups', fig.height=4, fig.width=6,  echo=FALSE, message=FALSE}
+
+tsne_frame <- as.data.frame(tsne_out$Y)
+rownames(tsne_frame) <- colnames(filteredVSTMat)
+colnames(tsne_frame) <- c("TSNE1", "TSNE2")
+
+at <- merge(tsne_frame, columnData, by=0)
+
+gp <- ggplot(at, aes_string("TSNE1", "TSNE2", 
+                            color=plot_color, shape=plot_shape))
+gp <- gp + geom_text(aes_string(label=plot_label), nudge_x=4, nudge_y=3,color="grey")
+gp <- gp + geom_point(size=2,alpha=1)
+
+print(gp)
+```
+
+\newpage
+
+## Hierarchical clustering of genes and samples
+
+
+```{r echo=FALSE, message=FALSE, include=FALSE}
+# retrieve the salmon_tpms
+statement = 'select distinct s.* 
+               from salmon_genes_tpms s 
+               inner join transcript_info i
+               on s.gene_id=i.gene_id
+               where i.gene_biotype="protein_coding"'
+
+raw_tpms = fetch_DataFrame(statement,scseq_db)
+
+rownames(raw_tpms) <- raw_tpms$gene_id
+raw_tpms$gene_id <- NULL
+
+# perform upper quartile normalisation
+tpms <- upperQuartileNormalise(raw_tpms)
+
+```
+
+```{R echo=FALSE, include=FALSE}
+print(dim(tpms))
+log_tpms <- log2(tpms + 1)
+lq <- quantile(log_tpms,0.25)
+filt_tpms <- log_tpms[apply(log_tpms,1,function(x) sum(x[x>lq])>nreplicates),]
+dim(filt_tpms)
+```
+
+Hierarchical clustering of genes and samples based on `r toString(nrow(filt_tpms))` expressed (>25^th^ expression quantile in at least `r toString(nreplicates)` samples) protein coding genes.
+
+```{r exp-hclust-expr, fig.cap='hierarchical clustering of samples based on protein coding gene expression', fig.height=8, fig.width=8,  echo=FALSE, message=FALSE}
+
+m <- filt_tpms
+
+colden <- get_den(t(m), dist_method="manhattan", clust_method="complete", optimize=T)
+rowden <- get_den(m, dist_method="manhattan", clust_method="complete", optimize=F)
+
+hm <- function() {
+    rnaseq_heatmap(m,
+              labRow=F,
+              colden=colden,
+              rowden=rowden,
+              key.xlab = "tpms log2(n+1)",
+              key.xticks=c(1:16),
+              log_factor=2)
+    }
+
+
+hm()
+```
+
+\clearpage
+
+Hierarchical clustering of genes and samples based on the expression of genes with significant variation in expression between the experimental groups.
+
+```{r exp-hclust-sig, fig.cap='hierarchical clustering of samples based on significantly variable genes', fig.height=8, fig.width=8,  echo=FALSE, message=FALSE}
+
+m <- log_tpms[rownames(log_tpms) %in% rownames(sigVst),]
+
+colden <- get_den(t(m), dist_method="manhattan", clust_method="complete", optimize=T)
+rowden <- get_den(m, dist_method="manhattan", clust_method="complete", optimize=F)
+
+hm <- function() {
+    rnaseq_heatmap(m,
+              labRow=F,
+              colden=colden,
+              rowden=rowden,
+              key.xlab = "tpms log2(n+1)",
+              key.xticks=c(1:16),
+              log_factor=2)
+    }
+
+
+hm()
+```
+

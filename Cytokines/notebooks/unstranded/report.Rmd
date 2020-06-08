@@ -1,0 +1,61 @@
+---
+header-includes:
+- \usepackage{placeins}
+- \usepackage{float}
+- \floatplacement{figure}{H}
+output:
+  pdf_document:
+    fig_caption: yes
+    keep_tex: yes
+    latex_engine: xelatex
+    number_sections: yes
+  html_document:
+    df_print: paged
+urlcolor: blue
+---
+
+```{r, include = FALSE}
+source("rnaseq.config.R")
+```
+
+\begin{centering}
+\vspace{3 cm}
+
+\Large
+`r toString(report_title)`
+
+\normalsize
+Analysis report, `r format(Sys.time(), "%b %d %Y")`
+
+`r toString(report_author)`
+
+\vspace{3 cm}
+\end{centering}
+
+\setcounter{tocdepth}{2}
+\tableofcontents
+
+\newpage
+
+```{r child = 'readqc.Rmd'}
+```
+
+\FloatBarrier
+\newpage
+
+```{r child = 'post_mapping_qc.Rmd'}
+```
+
+\FloatBarrier
+\newpage
+
+```{r child = 'exploratory.Rmd'}
+```
+
+
+\FloatBarrier
+\newpage
+
+```{r child = 'deseq2_featurecounts.Rmd'}
+```
+

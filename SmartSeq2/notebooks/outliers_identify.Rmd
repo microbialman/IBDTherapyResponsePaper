@@ -1,0 +1,124 @@
+---
+title: "Exploratory analysis"
+header-includes: #allows you to add in your own Latex packages
+- \usepackage{float} #use the 'float' package
+- \floatplacement{figure}{H} #make every figure with caption = h
+output:
+  pdf_document:
+    fig_caption: true
+    keep_tex: true
+    latex_engine: xelatex
+  html_document:
+    df_print: paged
+urlcolor: blue
+---
+
+```{r exp-setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(cache = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(out.extra = '')
+```
+
+
+```{r include=FALSE, echo=FALSE}
+library(ggplot2)
+library(gridExtra)
+library(DESeq2)
+library(reshape2)
+library(dplyr)
+library(vsn)
+library(gplots)
+library(RColorBrewer)
+library(ngsfoo)
+library(cowplot)
+source("rnaseq.config.R")
+```
+
+
+```{r include=FALSE, echo=FALSE}
+
+# load in the count data
+data = fetch_DataFrame("select * from featurecounts_counts", scseq_db)
+data <- data[,!colnames(data) %in% exclude]
+
+# load in the sample information
+statement = 'select * from sample_information'
+sample_info = fetch_DataFrame(statement, scseq_db)
+
+# add grouping information
+sample_info <- setGroup(sample_info,"experiment_group",experiment_groups)
+sample_info <- setGroup(sample_info,"plot_group",plot_groups)
+
+# construct a DESeq2 object
+rownames(data) <- data$gene_id
+data$gene_id <- NULL
+
+# define a data frame with information about the samples (i.e the columns of the countData)
+columnData <- as.data.frame(unclass(sample_info))
+rownames(columnData) <- columnData$sample_id
+
+columnData$biosample <- as.factor(columnData$biosample)
+
+# reorder the columnData to match the count matrix:
+columnData <- columnData[colnames(data),]
+
+# build a DESeqDataSet from the count matrix
+# note that the summed salmon numReads are simply rounded
+# this is identical to the procedeure performed
+# by tximport + DESeqDataSetFromTximport.
+dds <- DESeqDataSetFromMatrix(countData=round(data), 
+                              colData= columnData, 
+                              design = ~experiment_group)
+# estimate the size factions
+#controlGenes <- rownames(data) %in% hkgs
+#print(head(controlGenes))
+dds <- estimateSizeFactors(dds) #, controlGenes=controlGenes)
+
+# apply VST
+vstMat <- assay(varianceStabilizingTransformation(dds, blind=TRUE, fitType="local"))
+```
+
+# Exploratory data analysis {#explore}
+
+## Introduction
+
+This section of the report contains various exploratory analyses of the differences between the samples.
+
+## Data normalisation and transformation
+
+The [DESeq2](https://www.bioconductor.org/packages/devel/bioc/html/DESeq2.html) package was used to prepare normalised, variance-stabilised gene-expression values (from read counts generated with [Salmon](https://combine-lab.github.io/salmon/) for downstream analysis.
+
+
+## Number of counts and genes detected per-sample
+
+```{r counts-vs-genes, fig.cap='Numbers of reads and counts by sample', fig.height=4, fig.width=8,  echo=FALSE, message=FALSE}
+# get per sample counts
+
+d <- as.data.frame((apply(data,2,sum)))
+
+colnames(d) <- "counts"
+
+# get no. genes detected
+d$no_genes <- (apply(data,2,function(x) length(x[x>=1])))
+
+d$id <- factor(rownames(d), levels=rownames(d)[order(d$counts)])
+d$group <- columnData[rownames(d),plot_color]
+d$label <- columnData[rownames(d),plot_label]
+d$shape <- columnData[rownames(d),plot_shape]
+
+gp <- ggplot(d,aes_string("counts","no_genes",color="group", shape="shape", label="label"))
+gp <- gp + geom_point(size=4) + xlab("total read counts") + ylab("no. genes expressed")
+gp <- gp + geom_text(nudge_y=160,color="black", size=rel(2.5))
+gp <- gp + geom_vline(xintercept = 2.5E6) + xlab("total read counts") + ylab("no. genes expressed")
+gp <- gp + theme_cowplot()
+print(gp)
+ggsave("counts_ngenes.pdf", gp, width = 8, height = 4)
+```
+
+# Identify samples to exclude
+
+```{r}
+exclude_sample_ids <- rownames(subset(d, counts < 2.5E6))
+cat(deparse(sort(rownames(subset(d, counts < 2.5E6)))))
+```

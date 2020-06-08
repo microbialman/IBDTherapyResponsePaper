@@ -1,0 +1,70 @@
+---
+title: "Compare effective library size"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+stopifnot(require(sqlighter))
+```
+
+```{r}
+csvdb <- list(
+  "forward" = "/gfs/work/kralbrecht/16_matthias/scrnaseq/csvdb",
+  "reverse" = "/gfs/work/kralbrecht/16_matthias/scrnaseq_reverse/csvdb",
+  "unstranded" = "/gfs/work/kralbrecht/16_matthias/scrnaseq_unstranded/csvdb"
+)
+```
+
+```{r}
+preprocessCounts <- function(table, csvdb) {
+  x <- sqliteReadTable(table, csvdb)
+  rownames(x) <- x$gene_id
+  x$gene_id <- NULL
+  x <- as.matrix(x)
+  storage.mode(x) <- "integer"
+  x
+}
+counts <- list(
+  "forward" = preprocessCounts("featurecounts_counts", csvdb$forward),
+  "reverse" = preprocessCounts("featurecounts_counts", csvdb$reverse),
+  "unstranded" = preprocessCounts("featurecounts_counts", csvdb$unstranded)
+)
+```
+
+```{r}
+ref_rownames <- rownames(counts$forward)
+ref_colnames <- colnames(counts$forward)
+for (i in names(counts)) {
+  x <- counts[[i]]
+  stopifnot(identical(rownames(x), ref_rownames))
+  stopifnot(identical(colnames(x), ref_colnames))
+}
+```
+
+```{r}
+library_size <- data.frame(
+  "sample_id" = ref_colnames,
+  "forward" = colSums(counts$forward),
+  "reverse" = colSums(counts$reverse),
+  "unstranded" = colSums(counts$unstranded),
+  stringsAsFactors = FALSE
+)
+library_size
+```
+
+```{r}
+require(ggplot2)
+require(cowplot)
+require(reshape2)
+x <- melt(data = library_size, id.vars = "sample_id", measure.vars = c("forward", "reverse", "unstranded"))
+x
+```
+
+```{r}
+ggplot(x, aes(sample_id, value, color=variable)) +
+  geom_jitter(alpha = 0.5, width = 0.5) +
+  theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5)) +
+  scale_y_continuous(limits = c(0, NA))
+```
+

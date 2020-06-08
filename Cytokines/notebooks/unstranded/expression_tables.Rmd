@@ -1,0 +1,118 @@
+---
+title: "DESeq2 analysis"
+header-includes: #allows you to add in your own Latex packages
+- \usepackage{float} #use the 'float' package
+- \floatplacement{figure}{H} #make every figure with caption = h
+output:
+  pdf_document:
+    fig_caption: true
+    keep_tex: true
+    latex_engine: xelatex
+  html_document:
+    df_print: paged
+urlcolor: blue
+---
+
+```{r exprs-setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(cache = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(out.extra = '')
+
+#knitr::opts_chunk$set(fig.pos = 'H')
+```
+
+
+```{r include=FALSE, echo=FALSE}
+library(ggplot2)
+library(gridExtra)
+library(DESeq2)
+library(reshape2)
+library(dplyr)
+library(vsn)
+library(gplots)
+library(knitr)
+library(openxlsx)
+library(genefilter)
+library(pander)
+library(ggrepel)
+library(ngsfoo)
+source("rnaseq.config.R")
+```
+
+```{r echo=FALSE, include=FALSE}
+# DESeq2 parameters
+location_function <- "median"
+fit_type <- "local"
+experimental_design <- "~experiment_group"
+reference_levels <- list(celltype = "nT", treatment = "PBS")
+contrasts <- list("TfhPBS_vs_TfhCLL"=c("experiment_group","Tfh_PBS", "Tfh_CLL"),
+                  "nTPBS_vs_nTCLL"=c("experiment_group","nT_PBS", "nT_CLL"))
+p_value_threshold <- 0.05
+n_interesting_genes <- 15
+hm_row_cex <- 0.8
+hm_col_cex <- 0.8
+```
+
+
+```{r include=FALSE, echo=FALSE}
+
+key_cols <- c("gene_id","gene_name", "gene_biotype")
+
+# load in the count data
+statement <- 'select distinct f.*, i.gene_name, i.gene_biotype 
+               from featurecounts_counts f
+               inner join transcript_info i
+               on f.gene_id=i.gene_id
+               order by i.gene_biotype, gene_name'
+counts = fetch_DataFrame(statement, scseq_db)
+counts <- counts[,!colnames(counts) %in% exclude]
+counts <- counts[,c(key_cols,colnames(counts)[!colnames(counts) %in% key_cols])]
+
+statement <- 'select distinct s.*, i.gene_name, i.gene_biotype 
+               from salmon_genes_tpms s
+               inner join transcript_info i
+               on s.gene_id=i.gene_id
+               order by i.gene_biotype, gene_name'
+# load in the tpms (for heatmaps)
+tpms = fetch_DataFrame(statement, scseq_db)
+rownames(tpms) <- tpms$gene_id
+emat <- tpms[,colnames(tpms)[!colnames(tpms) %in% key_cols]]
+#tpms$gene_id <- NULL
+uqn_tpms <- round(upperQuartileNormalise(emat), digits=2)
+tpms <- merge(uqn_tpms, tpms[,key_cols],by=0)
+tpms <- tpms[,c(key_cols,colnames(emat))]
+tpms <- tpms[order(tpms$gene_biotype, tpms$gene_name),]
+head(tpms)
+
+
+```
+
+
+\clearpage
+
+## Summary numbers of differentially expressed genes
+
+```{r exprs-write-tables, echo=FALSE, message=FALSE, warning=FALSE}
+
+
+xlsx_frames <- list(salmon_uqn_tpms=tpms, featureCounts_raw_counts=counts)
+
+
+# save the results.
+xlsx_file = "expression_tables.xlsx"
+wb <- write.xlsx(xlsx_frames, file = xlsx_file, asTable=TRUE)
+setColWidths(wb, sheet = 1, cols = 1:35, widths = 15)
+setColWidths(wb, sheet = 2, cols = 1:35, widths = 15)
+saveWorkbook(wb, xlsx_file, overwrite = TRUE)
+
+#summary <- data.frame(summary_mat)
+
+
+```
+
+
+
+
+
+
