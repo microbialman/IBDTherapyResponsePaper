@@ -1,0 +1,147 @@
+---
+title: "Post mapping QC analysis"
+header-includes: #allows you to add in your own Latex packages
+- \usepackage{float} #use the 'float' package
+- \floatplacement{figure}{H} #make every figure with caption = h
+output:
+  pdf_document:
+    fig_caption: true
+    keep_tex: true
+    latex_engine: xelatex
+  html_document:
+    df_print: paged
+urlcolor: blue
+---
+
+```{r pmqc-setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(cache = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(out.extra = '')
+#knitr::opts_chunk$set(fig.pos = 'H')
+```
+
+
+```{r include=FALSE, echo=FALSE}
+library(ggplot2)
+library(gridExtra)
+library(DESeq2)
+library(reshape2)
+library(dplyr)
+library(vsn)
+library(gplots)
+library(knitr)
+library(ngsfoo)
+source("rnaseq.config.R")
+```
+
+
+```{r include=FALSE, echo=FALSE}
+
+statement <- 'select * from qc_summary'
+
+qc_data <- fetch_DataFrame(statement, scseq_db)
+
+# add grouping information
+qc_data <- setGroup(qc_data,"experiment_group",experiment_groups)
+qc_data <- setGroup(qc_data,"plot_group",plot_groups)
+
+df <- melt(qc_data, id.vars <- c("sample_id", "pct_reads_aligned",
+                               "plot_group", name_field_titles), 
+             measure.vars <- c("total_reads",
+                        "pct_duplication",
+                        "salmon_no_genes_pc",
+                        "featurecounts_no_genes_pc",
+                        "fraction_spliced",
+                        "library_size",
+                        "three_prime_bias",
+                        "pct_adapter",
+                        "median_insert_size"))
+
+# load in the sample information
+statement = 'select * from sample_information'
+sample_info = fetch_DataFrame(statement, scseq_db)
+
+# add grouping information
+sample_info <- setGroup(sample_info,"experiment_group",experiment_groups)
+sample_info <- setGroup(sample_info,"plot_group",plot_groups)
+rownames(sample_info) <- sample_info$sample_id
+
+
+```
+
+# Post-mapping QC analysis
+
+## Introduction
+
+Read alignment, quantification and post-mapping QC was performed using pipeline_scrnaseq.py from the [scseq code collection](https://github.com/snsansom/scseq).
+
+## Selected QC metrics
+
+The scatter plots show a selection of key QC metrics.
+
+```{r pmqc-metrics, fig.cap='Selected QC metrics: each metric is plotted against the fraction of reads aligning (x axis)', fig.height=6, fig.width=10,  echo=FALSE, message=FALSE}
+
+gp <- ggplot(df, aes_string("pct_reads_aligned", "value", 
+                            color=plot_color, 
+                            shape=plot_shape, 
+                            label=plot_label)) 
+gp <- gp + geom_text(aes_string(label=plot_label), size=2, nudge_x=0.0002, color="grey")
+gp <- gp + geom_point(size=2)
+gp <- gp + facet_wrap(~variable, scales="free")
+
+print(gp)
+
+```
+
+\clearpage
+
+## PCA of samples by QC metrics
+
+Principle components analysis is used to compare the samples by their QC metrics.
+
+
+```{r pmqc-pca, fig.cap='Principle components analysis is used to compare the samples by their QC metrics..', fig.height=6, fig.width=10,  echo=FALSE, message=FALSE}
+
+# Exclude due to absence of spike-ins....
+exclude <- c("fraction_spike", "nreads_uniq_map_spike")
+
+data <- qc_data[,!colnames(qc_data) %in% c(name_field_titles, "sample_id", "plot_group", "experiment_group", exclude)]
+
+rownames(data) <- qc_data$sample_id
+rownames(sample_info) <- sample_info$sample_id
+
+pca <- prcomp(data,scale=T)
+
+gps <- ggplot_prcomp(pca, 
+                 plots=list("A"=c("PC1","PC2"), "B"=c("PC3","PC4"), "C"=c("PC5","PC6")),
+                 sample_info, 
+                 color=plot_color, 
+                 shape=plot_shape,
+                 label=plot_label, size=2)
+
+grid.arrange(grobs=gps,ncol=2)
+```
+
+
+```{r pmqc-pca-loadings,  echo=FALSE, message=FALSE, eval=TRUE}
+
+require(xtable)
+r <- data.frame(pca$rotation)
+
+n=5
+begin = T
+for(comp in c("PC1","PC2","PC3"))
+    {
+        this <- r[rev(order(abs(r[[comp]])))[1:n],comp,drop=FALSE]
+        colnames(this) <- "value"
+        this$component <- comp
+        #this$qc_metric <- rownames(this)
+        if(begin==T) { loadings <- this; begin=F } else { loadings <- rbind(loadings,this)}
+        
+    }
+
+loadings <- loadings[,c("component","value")]
+kable(loadings, caption="The top loadings for the first three principle components")
+```
+

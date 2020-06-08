@@ -1,0 +1,94 @@
+---
+title: "A child"
+header-includes: #allows you to add in your own Latex packages
+- \usepackage{float} #use the 'float' package
+- \floatplacement{figure}{H} #make every figure with caption = h
+output:
+  pdf_document:
+    fig_caption: true
+    keep_tex: true
+    latex_engine: xelatex
+  html_document:
+    df_print: paged
+urlcolor: blue
+---
+
+```{r include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(cache = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(out.extra = '')
+
+#knitr::opts_chunk$set(fig.pos = 'H')
+```
+
+```{r include=FALSE, echo=FALSE}
+library(ggplot2)
+library(gridExtra)
+library(DESeq2)
+library(reshape2)
+library(dplyr)
+library(vsn)
+library(gplots)
+library(knitr)
+library(openxlsx)
+library(genefilter)
+library(pander)
+library(ggrepel)
+library(ngsfoo)
+source("rnaseq.config.R")
+```
+
+## Differentially expressed genes: `r toString(contrastTxt)`
+
+
+```{r , fig.cap=paste("normalisation plots;", contrastTxt), fig.width=6, fig.height=5,  echo=F}
+
+sf_plot <- plot_size_factors(dds, contrast)
+
+# inspect the normalisation
+norm_plots <- plotDensities(counts(dds,normalized=T), colData(dds),
+                              "experiment_group", "normalised counts (log2)")
+
+gps <- list(norm_plots$den, norm_plots$bp, sf_plot)
+grid.arrange(grobs=gps, nrows=2,ncol=2)
+
+```
+
+
+```{r , fig.cap=paste("diagnostic plots;", contrastTxt), fig.width=10, fig.height=4, echo=FALSE, message=FALSE, warning=FALSE}
+
+par(mfrow=c(1,2))
+# record the fit den, bp.
+plot_title = paste0(contrast," locfunc: ",location_function,", fit-type: ",fit_type)
+
+plotDispEsts(dds)
+
+# extract the results -- note this relies on correct order in formula
+cat('\r\n\r\n')
+if_plot(res$res)
+```
+
+```{r , fig.cap=paste("Differentially expressed genes: MA plot (left), volcano plot (right);", contrastTxt), fig.width=10, fig.height=5, echo=FALSE}
+
+
+par(mfrow=c(1,2))
+
+deplots <- de_plots(tt,
+                    interesting_genes=interesting_genes,
+                    abs_fc_threshold=abs_fc_threshold)
+ 
+ grid.arrange(grobs=(list(deplots$ma, deplots$volcano)), ncol=2)
+ 
+```
+
+```{r , fig.cap=paste("Heatmap of top differentially expressed genes;", contrastTxt), fig.width=6, fig.height=8, echo=FALSE, warning=FALSE, message=FALSE}
+de_heatmap(tpms[,res$samples],
+             interesting_genes=interesting_genes,
+              annotation=ann_df,
+              key_label="Salmon TPM (UQN)",
+              mar=c(8,8),
+              cexRow=hm_row_cex,
+              cexCol=hm_col_cex)
+```
+
