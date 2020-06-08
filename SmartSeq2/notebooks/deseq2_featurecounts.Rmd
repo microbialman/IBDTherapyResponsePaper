@@ -1,0 +1,276 @@
+---
+title: "DESeq2 analysis"
+header-includes: #allows you to add in your own Latex packages
+- \usepackage{float} #use the 'float' package
+- \floatplacement{figure}{H} #make every figure with caption = h
+output:
+  pdf_document:
+    fig_caption: true
+    keep_tex: true
+    latex_engine: xelatex
+  html_document:
+    df_print: paged
+urlcolor: blue
+---
+
+```{r deseq2-setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(cache = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(out.extra = '')
+
+#knitr::opts_chunk$set(fig.pos = 'H') #
+```
+
+
+```{r include=FALSE, echo=FALSE}
+library(ggplot2)
+library(gridExtra)
+library(DESeq2)
+library(reshape2)
+library(dplyr)
+library(vsn)
+library(gplots)
+library(knitr)
+library(openxlsx)
+library(genefilter)
+library(pander)
+library(ggrepel)
+library(ngsfoo)
+library(readxl)
+source("rnaseq.config.R")
+```
+
+
+```{r include=FALSE, echo=FALSE}
+
+# load in the count data
+data = fetch_DataFrame("select * from featurecounts_counts", scseq_db)
+data <- data[,!colnames(data) %in% exclude]
+rownames(data) <- data$gene_id
+data$gene_id <- NULL
+
+# load in the tpms (for heatmaps)
+tpms = fetch_DataFrame("select * from salmon_genes_tpms", scseq_db)
+rownames(tpms) <- tpms$gene_id
+tpms$gene_id <- NULL
+tpms <- upperQuartileNormalise(tpms)
+
+# filter out empty rows
+data <- data[rowSums(data) > 0, ]
+
+# load in the sample information
+statement = 'select * from sample_information'
+sample_info = fetch_DataFrame(statement, scseq_db)
+rownames(sample_info) <- sample_info$sample_id
+sample_info <- sample_info[!rownames(sample_info) %in% exclude, ]
+
+# add grouping information
+sample_info <- setGroup(sample_info,"experiment_group",experiment_groups)
+sample_info <- setGroup(sample_info,"plot_group",plot_groups)
+
+# add comparison information
+comparison_info <- read_excel("Comparisons.xlsx", "Kevin")
+sample_info <- merge(sample_info, comparison_info, all.x = TRUE, sort=FALSE)
+rownames(sample_info) <- sample_info$sample_id
+
+# make sure data has same order
+data <- data[, rownames(sample_info)]
+
+# load annotation data
+statement = 'select distinct gene_id, gene_name, gene_biotype from transcript_info'
+ann_df = fetch_DataFrame(statement, scseq_db)
+rownames(ann_df) <- ann_df$gene_id
+```
+
+```{r include=FALSE}
+dds <- setup_dds(counts = as.matrix(data),
+                 columnData = sample_info,
+                 design = experimental_design,
+                 reference_levels = reference_levels)
+```
+
+# Differential expression analysis (DESeq2)
+
+Differential expression testing was performed using the [DESeq2](http://www.bioconductor.org/packages/release/bioc/html/DESeq2.html) package.
+
+## Selection of method for estimating the location of the size factors
+
+```{r de-location, fig.cap='Comparison of median and shorth methods for size-factor location estimation.', fig.height=6, fig.width=10,  echo=FALSE, message=FALSE}
+
+# compare the median and shorth methods for estimating location
+d <- counts(dds)
+
+# exclude genes with 0 counts
+d <- d[apply(d,1,function(x) min(x) > 0),]
+print(dim(d))
+
+# geometric mean function - note that missing values/nas are not expected!
+gm <- function(x) { exp(sum(log(x)) / length(x)) }
+
+# get the geometric means
+gms <- apply(d,1, gm)
+
+# get the ratios
+r <- d/gms
+
+require(genefilter)
+
+# estimate the locations
+meds <- apply(r,2,median)
+shs <- apply(r,2,shorth)
+loc_df <- data.frame(median=meds, shorth=shs,sample=names(meds))
+
+# plot the fits
+mr <- melt(r)
+colnames(mr) <- c("gene_id","sample","value")
+
+gp <- ggplot(mr, aes(value)) + geom_freqpoly()
+gp <- gp + geom_vline(data=loc_df, aes(xintercept=median),color="red")
+gp <- gp + geom_vline(data=loc_df, aes(xintercept=shorth),color="blue")
+gp <- gp + scale_x_continuous(trans="log2")#, limits=c(0.25,4))
+gp <- gp + facet_wrap(~sample)
+gp <- gp + xlab("Per-gene size factors. Red line: median, Blue line: shorth")
+
+print(gp)
+
+```
+
+\clearpage
+
+## Selection of method for fitting expression-level variance relationship
+
+
+```{r de-fittype, fig.cap='Comparison of local and parametric fits for expression-variance relationship', fig.height=4, fig.width=10,  echo=FALSE, message=FALSE}
+
+dds_test <- dds
+
+par(mfrow=c(1,2))
+
+    for(fitType in c("local","parametric"))
+    {
+        dds_test <- estimateSizeFactors(dds_test, locfunc=match.fun(location_function))
+        dds_test <- estimateDispersions(dds_test, fitType=fitType)
+
+        plot_title = paste0("locfunc: ",location_function,", fit-type: ",fitType)
+        plotDispEsts(dds_test, main=plot_title)
+
+    }
+```
+
+
+
+
+```{r de-run-analysis, echo=FALSE, message=FALSE}
+figure_captions <- c()
+results <- list()
+
+for(contrast in names(contrasts))
+{
+ message(contrast)
+
+ samples <- sample_info$sample_id[sample_info[, contrasts[[contrast]][1]] %in% contrasts[[contrast]][2:3]]
+ 
+  # set up the Deseq2 object
+  dds <- setup_dds(counts=round(data),columnData=sample_info,
+                   subset=samples,
+                   design = sprintf("~ %s", contrasts[[contrast]][1]),
+                   reference_levels=reference_levels)
+  
+  message("A:", sum(dds[[contrasts[[contrast]][1]]] == "A"))
+  message("B:", sum(dds[[contrasts[[contrast]][1]]] == "B"))
+
+  # run Deseq2
+  res <- run_deseq2(dds,
+                name = contrast,
+                location_function = location_function,
+                contrast = contrasts[[contrast]],
+                fit_type = fit_type)
+
+  res$samples <- samples
+  results[[contrast]] <- res
+}
+```
+
+\clearpage
+
+
+```{r de-make-plots, echo=FALSE, message=FALSE, warning=FALSE, results='asis', cache=FALSE}
+
+for(contrast in names(results))
+{
+  contrastTxt <- gsub("_"," ",contrast)
+
+  res <-  results[[contrast]]
+  dds <- res$dds
+  tt <- res$table
+
+  # get the identifiers of genes to highlight.
+  interesting_genes <- get_interesting(tt,
+                                       p_value_threshold=p_value_threshold,
+                                       n=n_interesting_genes,
+                                       p_col="padj",
+                                       fc_col="log2FoldChange")
+
+  out <- NULL
+  out <- c(out, knitr::knit_child("./deseq2_plots.Rmd", quiet = TRUE))
+  cat(out)
+}
+```
+
+\clearpage
+
+## Summary numbers of differentially expressed genes
+
+```{r de-write-tables, echo=FALSE, message=FALSE, warning=FALSE}
+
+# save results in tables.
+
+begin <- TRUE
+
+xlsx_frames <- list()
+
+for(contrast in names(results))
+{
+    res <-  results[[contrast]]
+    dds <- res$dds
+    tt <- res$table
+
+    de_name <- gsub("_"," ",contrast)
+
+    nup <- dim(tt[tt$padj< p_value_threshold & tt$log2FoldChange> log2(abs_fc_threshold),])[1]
+    ndown <- dim(tt[tt$padj< p_value_threshold & tt$log2FoldChange< -log2(abs_fc_threshold),])[1]
+
+    if(begin) {
+        summary_mat <- matrix(c(de_name, nup, ndown),nrow=1)
+        begin <- FALSE
+    }
+
+
+    else { summary_mat <- rbind(summary_mat,c(de_name, nup, ndown))}
+
+    xlsx_frames[[de_name]] <- tt
+
+
+}
+
+# save the results.
+xlsx_file = "deseq2_results.xlsx"
+wb <- write.xlsx(xlsx_frames, file = xlsx_file, asTable=TRUE)
+saveWorkbook(wb, xlsx_file, overwrite = TRUE)
+
+summary <- data.frame(summary_mat)
+
+colnames(summary) <- c("comparison","n_up","n_down")
+rownames(summary) <- summary$comparison
+summary$comparison <- NULL
+
+kable(summary,caption=paste(
+	"Numbers of differentially expressed genes (padj < ",
+	 p_value_threshold,
+	", fold change > ",
+	abs_fc_threshold,
+	")"
+))
+
+```
