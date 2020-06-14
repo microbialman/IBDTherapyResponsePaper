@@ -8,6 +8,20 @@ This contains the WGCNA analyses used to define the modules in the discovery res
 
 Added by [Matthew Jackson](https://github.com/microbialman)
 
+## Resection_Whole_tissue
+
+This contains notebooks used to perform quality control, exploratory analysis, and differential expression in the discovery resection and discovery whole tissue RNA-Seq datasets.
+
+Added by [Kevin Rue-Albrecht](https://github.com/kevinrue)
+
 ## Cytokines
+
+This contains notebooks used to perform quality control, exploratory analysis, and differential expression in culture-expanded primary stromal cell lines from surgically resected intestinal tissue of IBD patients and stimulated them with a panel of cytokines.
+
+Added by [Kevin Rue-Albrecht](https://github.com/kevinrue)
+
 ## SmartSeq2
-## Whole_Tissue
+
+This contains notebooks used to perform quality control, exploratory analysis, and differential expression in FACS-sorted hematopoietic and non-hematopoietic cell subsets from the intestinal tissue of non-IBD and IBD patients.
+
+Added by [Kevin Rue-Albrecht](https://github.com/kevinrue)
