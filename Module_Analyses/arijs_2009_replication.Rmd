@@ -126,11 +126,21 @@ RepMEList = moduleEigengenes(t(matchrep), colors = matchdef$moduleColor, exclude
 RepMEs = RepMEList$eigengenes
 colnames(RepMEs)=gsub("ME","",colnames(RepMEs))
 
+#correlation between MEs in this dataset
+betMEcors = cor(RepMEs[which(metadat$PostTreatment==0),])
+nSamples=nrow(RepMEs[which(metadat$PostTreatment==0),])
+betMEps = corPvalueStudent(betMEcors, nSamples)
+betMEpadj=matrix(p.adjust(betMEps,method="fdr"),ncol=38,byrow = F)
+colnames(betMEpadj)=colnames(betMEps)
+rownames(betMEpadj)=rownames(betMEps)
+betMEpadj=ifelse(betMEpadj<0.05,1,0)
+colorer=colorRampPalette(rev(brewer.pal(11,"RdBu")))
+simpHeat(betMEcors,betMEpadj,colorer(11))
+ggsave(here("Plots","Arijis_2009_pre_treat_correlation_between_MEs.pdf"),width = 8,height = 6)
+
 #remove non NANCY associated MEs
 RepMEs = RepMEs[,colnames(RepMEs)%in%signancy$X]
 
-#write out the pretreatment MEs for the AUC analysis
-write.csv(RepMEs[which(metadat$PostTreatment==0),],here("Data","Generated","Arijs_2009_pre_treat_MEs.csv"))
 ```
 
 ## Pre-treatment differences by response 
@@ -146,6 +156,11 @@ preMeta$aTNF_Response=as.character(preMeta$aTNF_Response)
 preMeta$aTNF_Response[preMeta$aTNF_Response==1]="Yes"
 preMeta$aTNF_Response[preMeta$aTNF_Response==0]="No"
 preMeta$aTNF_Response=factor(preMeta$aTNF_Response)
+
+#write out the pretreatment MEs
+writeMEs=preMEs
+writeMEs$Response=ifelse(preMeta$aTNF_Response=="Yes","Responder","Non-Responder")
+write.csv(writeMEs,here("Data","Generated","Arijs_2009_pre_treat_MEs.csv"))
 
 preplots=list()
 ps=c()

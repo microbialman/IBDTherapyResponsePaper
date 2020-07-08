@@ -177,25 +177,37 @@ After filtering a total of **`r length(which(bwnet$goodGenes==TRUE))`** genes we
 These were clustered into modules by splitting data into **`r length(bwnet$dendrograms)`** blocks.
 A total of **`r length(table(bwnet$colors))-1`** modules were identified (plus an additional unassigned module (grey)).
 
-## Module correlations with metadata
+## Module correlations and correlations with metadata
 
-Find correlation between module eigengenes and metadata traits.
-Find modules associated with inflammation.
+Find correlations between modules.
+Find correlation between module eigengenes and metadata traits to identify modules associated with inflammation.
 
 ```{r, fig.width=15,fig.height=8, results='asis',echo=FALSE}
 #get number of samples
 nSamples=nrow(tpm)
+#colors for heatmaps
+colorer=colorRampPalette(rev(brewer.pal(11,"RdBu")))
 # Reorder MEs so that correlated MEs are side by side
 MEs = orderMEs(MEs)
 
-#write out the MEs
-rownames(MEs)=rownames(traitData)
-write.csv(MEs,here("Data","Generated","discovery_MEs.csv"))
-
 #rename the MEs from their color names to the numbers used int he manuscript
+rownames(MEs)=rownames(traitData)
 namekey=read.csv(here("Data","Input","module_number_key.csv.gz"),header=F)
 colnames(MEs)=gsub("ME","",colnames(MEs))
 colnames(MEs)=namekey[match(colnames(MEs),namekey[,1]),2]
+
+#write out the MEs
+write.csv(MEs,here("Data","Generated","discovery_MEs.csv"))
+
+#correlate MEs with one another
+betMEcors = cor(MEs)
+betMEps = corPvalueStudent(betMEcors, nSamples)
+betMEpadj=matrix(p.adjust(betMEps,method="fdr"),ncol=38,byrow = F)
+colnames(betMEpadj)=colnames(betMEps)
+rownames(betMEpadj)=rownames(betMEps)
+betMEpadj=ifelse(betMEpadj<0.05,1,0)
+simpHeat(betMEcors,betMEpadj,colorer(11))
+ggsave(here("Plots","discovery_correlation_between_MEs.pdf"),width = 8,height = 6)
 
 #correlate MEs vs numerical versions of traits
 numTraitData=data.frame(lapply(traitData,as.numeric))
@@ -207,8 +219,6 @@ rownames(padj)=rownames(moduleTraitPvalue)
 #remove traits and modules with no significant associations
 nonsigrows=which(rowSums(moduleTraitPvalue<0.05)==0)
 nonsigcols=which(colSums(moduleTraitPvalue<0.05)==0)
-
-colorer=colorRampPalette(rev(brewer.pal(11,"RdBu")))
 
 #adjust p significant
 nonsigarows=which(rowSums(padj<0.05)==0)

@@ -108,16 +108,26 @@ From these, **`r nrow(matchdef)`** were also in the replication data set (**`r r
 
 Responders were defined as anyone who had an endoscopic score of 0 or 1 at any of the time points during the study.
 
-```{r data prep,include=F}
+```{r data prep,include=T}
 #generate the module eigengenes
 RepMEList = moduleEigengenes(t(matchrep), colors = matchdef$moduleColor[,drop=TRUE], excludeGrey = TRUE)
 RepMEs = RepMEList$eigengenes
 colnames(RepMEs)=gsub("ME","",colnames(RepMEs))
 
+#correlation between MEs in this dataset
+betMEcors = cor(RepMEs)
+nSamples=nrow(RepMEs)
+betMEps = corPvalueStudent(betMEcors, nSamples)
+betMEpadj=matrix(p.adjust(betMEps,method="fdr"),ncol=38,byrow = F)
+colnames(betMEpadj)=colnames(betMEps)
+rownames(betMEpadj)=rownames(betMEps)
+betMEpadj=ifelse(betMEpadj<0.05,1,0)
+colorer=colorRampPalette(rev(brewer.pal(11,"RdBu")))
+simpHeat(betMEcors,betMEpadj,colorer(11))
+ggsave(here("Plots","Arijis_2018_correlation_between_MEs.pdf"),width = 8,height = 6)
+
 #remove non NANCY associated MEs
 RepMEs = RepMEs[,colnames(RepMEs)%in%signancy$X]
-#write out the pretreatment MEs
-write.csv(RepMEs[metadat$week..w..ch1=="W0",],here("Data","Generated","Arijs_2018_pre_treatment_MEs.csv"))
 
 #Note responder at any time point
 repmet=metadat[metadat$week..w..ch1=="W0",]
@@ -140,11 +150,18 @@ for(i in repmet$study.individual.number.ch1){
 repmet$treatment_response=response
 repmet=repmet[,-c(3)]
 
+
+
 #write out response data for use elsewhere
 write.csv(repmet,here("Data","Generated","Arijs_2018_w0_with_repsonse_meta.csv"))
 
 #subset data to just pre-treatment timepoints for comparisons
 RepMEs=RepMEs[rownames(metadat)%in%rownames(repmet),]
+#write out the pretreatment MEs
+writeMEs=RepMEs
+writeMEs$Treatment=repmet$induction.therapy_maintenance.therapy.ch1
+writeMEs$Response=ifelse(repmet$treatment_response==1,"Responder","Non-Responder")
+write.csv(writeMEs,here("Data","Generated","Arijs_2018_pre_treatment_MEs.csv"))
 
 ```
 

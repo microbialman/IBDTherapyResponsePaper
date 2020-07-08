@@ -108,12 +108,23 @@ RepMEList = moduleEigengenes(t(matchrep), colors = matchdef$moduleColor, exclude
 RepMEs = RepMEList$eigengenes
 colnames(RepMEs)=gsub("ME","",colnames(RepMEs))
 
+#correlation between MEs in this dataset
+betMEcors = cor(RepMEs[which(metadat$initial.treatment.ch1!="5ASA"),])
+nSamples=nrow(RepMEs[which(metadat$initial.treatment.ch1!="5ASA"),])
+betMEps = corPvalueStudent(betMEcors, nSamples)
+betMEpadj=matrix(p.adjust(betMEps,method="fdr"),ncol=38,byrow = F)
+colnames(betMEpadj)=colnames(betMEps)
+rownames(betMEpadj)=rownames(betMEps)
+betMEpadj=ifelse(betMEpadj<0.05,1,0)
+colorer=colorRampPalette(rev(brewer.pal(11,"RdBu")))
+simpHeat(betMEcors,betMEpadj,colorer(11))
+ggsave(here("Plots","Haberman_pre_treat_corticosteroid_correlation_between_MEs.pdf"),width = 8,height = 6)
+
 #remove non NANCY associated MEs
 RepMEs = RepMEs[,colnames(RepMEs)%in%signancy$X]
 
 csMEs=RepMEs[which(metadat$initial.treatment.ch1!="5ASA"),]
 csMeta=metadat[which(metadat$initial.treatment.ch1!="5ASA"),]
-
 colnames(csMeta)=gsub(".ch1","",colnames(csMeta))
 
 #get the color mapping from the name
@@ -134,6 +145,11 @@ for(i in 1:ncol(csMEs)){
   test=wilcox.test(me~groups)
   ps=c(ps,test$p.value)
 }
+
+#write out the MEs
+csMEswrite=csMEs
+csMEswrite$Response=ifelse(csMeta$week.4.remission=="Yes","Responder","Non-Responder")
+write.csv(csMEswrite,here("Data","Generated","Haberman_pre_treat_corticosteroid_MEs.csv"))
 
 adjp=p.adjust(ps,method="fdr")
 siglist=csplots[adjp<0.05]
