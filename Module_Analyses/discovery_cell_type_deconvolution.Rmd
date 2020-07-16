@@ -41,7 +41,8 @@ colnames(rnadat)=namesvect[colnames(rnadat)]
 #merge dupliacate gene names
 rnadat = mergDupCol(rnadat,FALSE)
 #Calculate the cell type scores
-xcel=xCellAnalysis(t(rnadat),rnaseq = T, file.name = here("Data","Generated","discovery_xCell_Scores.txt"))}
+xcel=xCellAnalysis(t(rnadat),rnaseq = T, file.name =here("Data","Generated","discovery_xCell_Scores.txt"))
+}
 
 #read in files
 xcellin=read_delim(here("Data","Generated","discovery_xCell_Scores.txt"),"\t") %>% t()
@@ -58,11 +59,6 @@ rownames(xcel)=rnames
 MEs = MEs %>% arrange(match(MEs$X1,meta$`sample_ID (patient)`))
 #just focus on celltypes in >25% of samples
 filtxcel=xcel[,-which(colSums(xcel==0)>(nrow(xcel)*0.75))]
-
-#rename MEs to the paper numbers
-namekey=read.csv(here("Data","Input","module_number_key.csv.gz"),header=F)
-colnames(MEs)=gsub("ME","",colnames(MEs))
-colnames(MEs)=namekey[match(colnames(MEs),namekey[,1]),2]
 
 #Heatmap of correlations between cell type scores and MEs
 cellMECor =cor(filtxcel, MEs[,-1], use = "p")
