@@ -236,7 +236,7 @@ filtadjPClean2=filtadjP[,-removevars]
 rownames(filtadjCorClean2)=gsub("ME","",rownames(filtadjCorClean2))
 rownames(filtadjPClean2)=rownames(filtadjCorClean2)
 
-simpHeat(t(filtadjCorClean2),t(filtadjPClean2),colorer(11))+scale_fill_gradientn(colors=colorer(11),breaks=c(-0.8,0,0.8),labels=c(-0.8,0,0.8),limits=c(-0.8,0.8))+scale_color_manual(values=c("black",NA),labels=c("FDR<0.05",""),name="Significance")
+simpHeat(t(filtadjCorClean2),t(filtadjPClean2),colorer(11))+scale_fill_gradientn(colors=colorer(11),breaks=c(-0.85,0,0.85),labels=c(-0.85,0,0.85),limits=c(-0.85,0.85))+scale_color_manual(values=c("black",NA),labels=c("FDR<0.05",""),name="Significance")
 ggsave(here("Plots","discovery_cleaned_metadata_heatmap_selected_variables.pdf"),,width = 15,height = 8)
 
 pas=data.frame(padj)
@@ -255,11 +255,18 @@ It is clear that the modules are largely correlating with differences in inflamm
 As the controls introduce a distinct clustering, we aimed to see if the correlation with inflammation severity (NANCY) is maintained within IBD paitients alone.
 
 ```{r fig.width=10,fig.height=8, results='asis',echo=FALSE, include=T}
+#calculate MEs just for IBD patients
+IBDMEs = moduleEigengenes(tpm[traitData$Combined==1,], colors = bwModuleColors, excludeGrey = TRUE,)
+IBDMEs = IBDMEs$eigengenes
+colnames(IBDMEs)=gsub("ME","",colnames(IBDMEs))
+colnames(IBDMEs)=namekey[match(colnames(IBDMEs),namekey[,1]),2]
+
+write.csv(IBDMEs,here("Data","Generated","discovery_MEs_IBD_patients_only.csv"))
 
 #correlate MEs vs numerical versions of traits
 #remove CRC and control vs ibd columns and CRC samples
 IBDnumTraitData = numTraitData[numTraitData$Combined==2,-c(14,17)]
-IBDmoduleTraitCor = cor(MEs[numTraitData$Combined==2,], IBDnumTraitData, use = "p")
+IBDmoduleTraitCor = cor(IBDMEs, IBDnumTraitData, use = "p")
 IBDmoduleTraitPvalue = corPvalueStudent(IBDmoduleTraitCor, nrow(IBDnumTraitData))
 IBDpadj=matrix(p.adjust(IBDmoduleTraitPvalue,method="fdr"),ncol=15,byrow = F)
 colnames(IBDpadj)=colnames(IBDnumTraitData)
@@ -277,6 +284,7 @@ kable(data.frame(Cor=IBDfiltadjCor,AdjP=IBDfiltadjP))
 #we have less power in this comparison due to the smaller sample size so also check to see if correlations in general match across the comparisons with IBD+CRC or with CRC only
 ibdnancycors = IBDmoduleTraitCor[,"NANCYscore"]
 allnancycors = moduleTraitCor[,"NANCYscore"]
+ibdnancycors = ibdnancycors[names(allnancycors)]
 modcols = namekey[match(names(ibdnancycors),namekey[,2]),1]
 modnames = factor(names(ibdnancycors),levels=names(ibdnancycors))
 modsig = ifelse(modnames%in%names(IBDfiltadjP),23,NA)

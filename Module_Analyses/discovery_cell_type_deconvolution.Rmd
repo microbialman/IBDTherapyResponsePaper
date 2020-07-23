@@ -76,7 +76,7 @@ ggsave(here("Plots","discovery_modules_by_cell_type_scores_heatmap.pdf"),width =
 # Correlations between modules by cell type assignment
 
 ```{r mod_cor_network, include=T}
-#tissue definitions done manually from previous heatmap for modules significantly correlated with M4 or M5 below
+#tissue/cell type definitions done manually from previous heatmap for modules significantly correlated with M4 or M5 below
 defs <- rbind(
   c("M24","Epithelial"),
   c("M23","Epithelial"),
@@ -91,16 +91,17 @@ defs <- rbind(
   c("M1","Vascular/Fibroblast"),
   c("M2","Vascular/Fibroblast"),
   c("M10","Vascular/Fibroblast"),
-  c("M3","Vascular/Fibroblast"),
   c("M8","Vascular/Fibroblast"),
   c("M9","Vascular/Fibroblast"),
-  c("M7","Neutrophil"),
-  c("M5","Neutrophil")
+  c("M7","Granulocyte"),
+  c("M5","Granulocyte"),
+  c("M6","Lymphocyte"),
+  c("M12","Lymphocyte")
 )
 defs <- data.frame(defs)
 colnames(defs) <- c("Module","Group")
 #colors for the cell types
-groupcols <- cbind(c("Epithelial","Vascular/Fibroblast","Neutrophil"),brewer.pal(3,"Dark2"))
+groupcols <- cbind(unique(as.character(defs$Group)),brewer.pal(4,"Dark2"))
 
 #data frame of the module eigengenes so dont have to work with tibble 
 eigen <- data.frame(MEs[,-1])
@@ -115,7 +116,7 @@ longcors <- data.frame(cors) %>% rownames_to_column("Row") %>% gather("Col","Cor
 #generate a network plot
 edges <- longcors %>% filter(Sig==1) %>% select(Row,Col,Cor)
 g <- make_undirected_graph(rbind(edges$Row,edges$Col)) %>% set_edge_attr("weight",value=edges$Cor) %>%
-  set_edge_attr("color", value=ifelse(edges$Cor>0,"#B21A06","#075B6E")) %>% set_edge_attr("width",value=(abs(edges$Cor)^5)*10)
+  set_edge_attr("color", value=ifelse(edges$Cor>0,"#B21A06","#075B6E")) %>% set_edge_attr("width",value=(abs(edges$Cor)))
 
 #just get vertices connected to M4 and M5
 m45 <- c("M4","M5")
@@ -124,9 +125,8 @@ keep <- unique(c(neigh$Col,neigh$Row))
 rem <- V(g)
 rem <- rem[!names(rem)%in%keep]
 g <- delete_vertices(g,rem)
-l <- layout_as_star(g, center="M4")
 vcols <- c()
-for(i in names(V(g))){
+for(i in names(V(g))){g
   if(i%in%defs$Module){
     vcols <- c(vcols,groupcols[which(groupcols[,1]==defs$Group[defs$Module==i]),2])
   }else{
@@ -134,9 +134,8 @@ for(i in names(V(g))){
   }
 }
 g <- g %>% set_vertex_attr("color",value=vcols) %>% set_vertex_attr("degree",value=degree(g))
-netplot <- ggnet2(g, mode=l, edge.size = E(g)$width, edge.color = E(g)$color, node.color = V(g)$color, node.size=18,
-       node.label = names(V(g)), label.color = "white", edge.alpha = 0.7, label.size = 6)+
-  theme(axis.line = element_blank())+guides(size=F)
+netplot <- ggnet2(g, mode=layout_in_circle(g), edge.size = ((E(g)$width^1.2)*2), edge.color = E(g)$color, node.color = V(g)$color, node.size=14,node.label = names(V(g)), label.color = "white", edge.alpha = 0.7, label.size = 4)+
+  theme(axis.line = element_blank())+guides()
 
 
 #plot heat map of the correlations with xcell scores, just for the modules in the network plot
@@ -151,11 +150,13 @@ modclust <- cor(filteigen,xcel) %>% dist() %>% hclust()
 cellclust <- t(cor(filteigen,xcel)) %>% dist() %>% hclust() 
 xcellcors <- xcellcors %>% filter(Module%in%colnames(filteigen)) %>% mutate(Module=factor(Module,levels=modclust$labels[modclust$order]),CellType=factor(CellType,levels=cellclust$labels[cellclust$order]))
 #keep relevant cell types for main paper plot
-keepcells <- c("Epithelial cells","Keratinocytes","Pericytes","mv Endothelial cells",
-               "Fibroblasts","Endothelial cells","ly Endothelial cells","Basophils","Neutrophils")
-keepcelltiss <- cbind(keepcells,c("Epithelial","Epithelial","Vascular/Fibroblast","Vascular/Fibroblast","Vascular/Fibroblast","Vascular/Fibroblast","Vascular/Fibroblast","Neutrophil","Neutrophil"))
+#keep relevant cell types for main paper plot
+keepcells <- c("Epithelial cells","Keratinocytes","Pericytes","mv Endothelial cells","Endothelial cells","ly Endothelial cells","Fibroblasts","Basophils","Neutrophils","Mast cells","Macrophages M1","Macrophages M2","DC","iDC","cDC","pDC","MPP","CD4+ naive T-cells", "naive B-cells","class-switched memory B-cells","pro B-cells","B-cells","Memory B-cells","Plasma cells","CD8+ T-cells","CD8+ Tcm","Th1 cells","Tregs")
+keepcelltiss <- cbind(keepcells,c("Epithelial","Epithelial","Vascular/Fibroblast","Vascular/Fibroblast","Vascular/Fibroblast","Vascular/Fibroblast","Granulocyte","Granulocyte","Granulocyte","MNP","MNP","MNP","MNP","MNP","MNP","MNP","Lymphocyte","Lymphocyte","Lymphocyte","Lymphocyte","Lymphocyte","Lymphocyte","Lymphocyte","Lymphocyte","Lymphocyte","Lymphocyte","Lymphocyte","Lymphocyte"))
 filtxcellcors <- xcellcors %>% filter(CellType%in%keepcells) %>% mutate(CellType=droplevels(CellType),Module=droplevels(Module))
-xcols <- groupcols[match(keepcelltiss[match(levels(filtxcellcors$CellType),keepcelltiss[,1]),2],groupcols[,1]),2]
+xcols <- groupcols[match(keepcelltiss[,2],groupcols[,1]),2]
+xcols[is.na(xcols)] <- "grey"
+xcols <- xcols[match(levels(filtxcellcors$CellType),keepcelltiss[,1])]
 ycols <- c()
 #generate label colours
 for(i in levels(filtxcellcors$Module)){
@@ -172,9 +173,10 @@ heatplot <- filtxcellcors %>% ggplot(aes(x=CellType,y=Module,fill=Cor))+geom_til
                                                  axis.text.x = element_text(angle = 90,hjust=1,vjust=0.5,colour =xcols),
                                                 axis.text.y = element_text(color=ycols))
 
-pdf(here("Plots","module_correlation_network_with_cell_types.pdf"),width=10, height=7)
-plot_grid(heatplot,netplot,ncol=2, rel_widths = c(0.35,0.65))
+pdf(here("Plots","module_correlation_network_with_cell_types.pdf"),width=13, height=6)
+plot_grid(heatplot,netplot,ncol=2, rel_widths = c(0.5,0.45))
 dev.off()
+
 ```
 ```{r plotplot, fig.width=15, fig.height=10}
 

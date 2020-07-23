@@ -90,9 +90,10 @@ write.csv(comb,here("Data","Generated","Combined_gene_wise_response_auc_all_modu
 
 
 colmapper=c("M5"="orange","M4"="paleturquoise")
+colvect=as.vector(colmapper[match(comb$ModuleA,names(colmapper))])
 
 comb$GeneLabel=ifelse(comb$ModuleA%in%c("M4","M5"),as.character(comb$Gene),NA)
-comb$PCol=ifelse(comb$ModuleA%in%c("M4","M5"),colmapper[comb$ModuleA],NA)
+comb$PCol=colvect
 comb$PCol2=ifelse(comb$ModuleA%in%c("M4","M5"),"black",NA)
 ```
 
