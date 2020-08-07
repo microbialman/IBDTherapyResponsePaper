@@ -234,8 +234,8 @@ removevars=c(11,6,10,9,8)
 filtadjCorClean2=filtadjCor[,-removevars]
 filtadjPClean2=filtadjP[,-removevars]
 nonsigarows2=which(rowSums(filtadjPClean2)==0)
-filtadjCorClean2=filtadjCor[-nonsigarows2,]
-filtadjPClean2=filtadjP[-nonsigarows2,]
+filtadjCorClean2=filtadjCorClean2[-nonsigarows2,]
+filtadjPClean2=filtadjPClean2[-nonsigarows2,]
 rownames(filtadjCorClean2)=gsub("ME","",rownames(filtadjCorClean2))
 rownames(filtadjPClean2)=rownames(filtadjCorClean2)
 
