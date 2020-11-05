@@ -25,3 +25,9 @@ Added by [Kevin Rue-Albrecht](https://github.com/kevinrue)
 This contains notebooks used to perform quality control, exploratory analysis, and differential expression in FACS-sorted hematopoietic and non-hematopoietic cell subsets from the intestinal tissue of non-IBD and IBD patients.
 
 Added by [Kevin Rue-Albrecht](https://github.com/kevinrue)
+
+## Tenx
+
+This contains all code associated with the analysis of single-cell data.
+
+Added by [Ilya Korsunsky](https://github.com/ilyakorsunsky)
