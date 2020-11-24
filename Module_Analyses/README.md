@@ -9,10 +9,10 @@ Added by [Matthew Jackson](https://github.com/microbialman)
 All the code to run the analyses and generate figures etc. are found in the R markdown reports (.Rmd).
 
 The input data tables used for these analyses can be found in Data/Input.
-After running output tables and plots will be found in the Output and Plots folders respectively.
-Markdown reports will also provide a brief discussion of the analyses used in the .html files generated.
+After running, output tables and plots will be found in the Output and Plots folders respectively.
+The markdown reports (generated .html files) will also provide a brief discussion of the analyses used.
 
-Session info for the discovery_module_analysis run used for the paper is given below to show the software versions used.
+Session info for the discovery_module_analysis run used for the paper is given below, highlighting the software versions used.
 
 
 ```r
