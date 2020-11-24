@@ -1,6 +1,6 @@
 # IBDTherapyResponsePaper
 
-This repository contains code used for the analyses in the IBD Therapy Response paper by Friedrich and Pohin et al. It is divided into folders, each concerning a different data type or analytical approach. These are briefly outlined below.
+This repository contains code used for the analyses in the IBD Therapy Response paper by Friedrich, Pohin, and Jackson et al. It is divided into folders, each concerning a different data type or analytical approach. These are briefly outlined below.
 
 ## Module_Analyses
 
