@@ -9,8 +9,6 @@ chunk_output_type: console
 
 ```{r echo=FALSE}
 library(here)
-#load BioFunk
-source("~/devel/Useful_Scripts/BioFunk.R")
 suppressPackageStartupMessages(library(hablar))
 suppressPackageStartupMessages(library(tidyverse))
 suppressPackageStartupMessages(library(ggbeeswarm))
@@ -23,9 +21,9 @@ options(stringsAsFactors = FALSE)
 suppressPackageStartupMessages(library("GEOquery"))
 suppressPackageStartupMessages(library("affy"))
 set.seed(666)
-
+library(cowplot)
 theme_set(theme_cowplot())
-
+source(here("Scripts","BioFunk.R"))
 #### Code used to generate the expression file ####
 
 #ID is GSE109142
@@ -132,6 +130,8 @@ namekey=read.csv(here("Data","Input","module_number_key.csv.gz"),header=F)
 
 csplots=list()
 ps=c()
+medresp=c()
+mednonresp=c()
 for(i in 1:ncol(csMEs)){
   me=csMEs[,i]
   mename=colnames(RepMEs)[i]
@@ -139,10 +139,13 @@ for(i in 1:ncol(csMEs)){
   namekey[namekey[,2]==mename,1]
   colorname=namekey[namekey[,2]==mename,1]
   df=data.frame("Eigengene"=me,"Response"=groups)
-  pl=ggplot(df,aes(x=Response,y=Eigengene,fill=colorname))+geom_boxplot()+geom_quasirandom()+
-    ylab(paste0(mename))+scale_fill_manual(values=colorname)+guides(fill=F)
+  pl=ggplot(df,aes(x=Response,y=Eigengene,fill=colorname))+geom_violin()+geom_quasirandom()+
+    ylab(paste0(mename))+scale_fill_manual(values=colorname)+
+    stat_summary(fun.y="median",geom="hpline")+guides(fill=F)
   csplots[[mename]]=pl
   test=wilcox.test(me~groups)
+  medresp=c(medresp,median(me[groups=="Yes"]))
+  mednonresp=c(mednonresp,median(me[groups=="No"]))
   ps=c(ps,test$p.value)
 }
 
@@ -155,7 +158,7 @@ adjp=p.adjust(ps,method="fdr")
 siglist=csplots[adjp<0.05]
 
 cat("**Wilcox results responders vs. non-responders corticosteroids (All)**")
-psdf=data.frame("Module"=colnames(csMEs),"Wilcox_p"=ps,"Wilcox_FDR_p"=adjp)
+psdf=data.frame("Module"=colnames(csMEs),"Wilcox_p"=ps,"Wilcox_FDR_p"=adjp,"Median_Responders"=medresp,"Median_Non_Responders"=mednonresp)
 psdf=psdf[order(adjp),]
 kable(psdf)
 

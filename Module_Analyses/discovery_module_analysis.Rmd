@@ -1,10 +1,8 @@
 ---
 title: "Discovery Cohort WGCNA Analysis"
-editor_options: null
 output:
   html_document: default
   pdf_document: default
-chunk_output_type: console
 ---
 
 # Data QC
@@ -23,6 +21,7 @@ library(pheatmap)
 library(biomaRt,quietly = T)
 library(knitr,quietly = T)
 library(ggpubr)
+library(tidyverse)
 #load WGCNA
 suppressPackageStartupMessages(library(WGCNA))
 options(stringsAsFactors = FALSE)
@@ -71,8 +70,9 @@ Heirarchical clustering plot to check for outliers and metadata associations.
 
 ```{r,fig.width=10,fig.height=4,echo=FALSE}
 traitData = read.csv(here("Data","Input","discovery_metadata.csv.gz"),stringsAsFactors = T)
+
 #subset metadata to remaning samples and put in matching order
-traitData=traitData[match(rownames(tpm),traitData$sample_ID..patient.),]
+traitData=traitData[match(rownames(tpm),traitData$sample_ID),]
 
 #reformat disease data
 traitData$Disease.CRC=as.factor(ifelse(traitData$disease=="A",1,0))
@@ -97,7 +97,7 @@ metaDend(tpm,traitData,10,1/3,102,4)
 
 ```
 
-No obvious outliers, reasonable clustering of control and IBD samples.
+No obvious outliers, reasonable clustering of inflammed IBD samples.
 
 # WGCNA
 
@@ -183,8 +183,12 @@ Find correlations between modules.
 Find correlation between module eigengenes and metadata traits to identify modules associated with inflammation.
 
 ```{r, fig.width=15,fig.height=8, results='asis',echo=FALSE}
+#remove sample 2, should have been filtered for poor rna but got missed
+MEs=MEs[-which(rownames(MEs)==2),]
+traitData=traitData[-which(rownames(traitData)==2),]
+tpm=tpm[-which(rownames(tpm)==2),]
 #get number of samples
-nSamples=nrow(tpm)
+nSamples=nrow(MEs)
 #colors for heatmaps
 colorer=colorRampPalette(rev(brewer.pal(11,"RdBu")))
 # Reorder MEs so that correlated MEs are side by side
@@ -199,7 +203,7 @@ colnames(MEs)=namekey[match(colnames(MEs),namekey[,1]),2]
 #write out the MEs
 write.csv(MEs,here("Data","Generated","discovery_MEs.csv"))
 
-#correlate MEs with one another
+#correlate MEs with one another - across all samples
 betMEcors = cor(MEs)
 betMEps = corPvalueStudent(betMEcors, nSamples)
 betMEpadj=matrix(p.adjust(betMEps,method="fdr"),ncol=38,byrow = F)
@@ -209,12 +213,13 @@ betMEpadj=ifelse(betMEpadj<0.05,1,0)
 simpHeat(betMEcors,betMEpadj,colorer(11))
 ggsave(here("Plots","discovery_correlation_between_MEs.pdf"),width = 8,height = 6)
 
-#correlate MEs vs numerical versions of traits
-numTraitData=data.frame(lapply(traitData,as.numeric))
-moduleTraitCor = cor(MEs, numTraitData, use = "p")
-moduleTraitPvalue = corPvalueStudent(moduleTraitCor, nSamples)
-padj=matrix(p.adjust(moduleTraitPvalue,method="fdr"),ncol=17,byrow = F)
-colnames(padj)=colnames(traitData)
+#correlate MEs vs numerical versions of traits - inflammed tissue vs CRC
+infcrc <- traitData %>% rownames_to_column("sample_id") %>% dplyr::filter(!(.$Combined==1&.$affected==0)) %>% dplyr::select(-c(Patient_ID,affected))
+numTraitData=data.frame(lapply(infcrc,as.numeric)) %>% dplyr::select(-sample_id)
+moduleTraitCor = cor(MEs[infcrc$sample_id,], numTraitData, use = "p")
+moduleTraitPvalue = corPvalueStudent(moduleTraitCor, nrow(infcrc))
+padj=matrix(p.adjust(moduleTraitPvalue,method="fdr"),ncol=16,byrow = F)
+colnames(padj)=colnames(numTraitData)
 rownames(padj)=rownames(moduleTraitPvalue)
 #remove traits and modules with no significant associations
 nonsigrows=which(rowSums(moduleTraitPvalue<0.05)==0)
@@ -230,7 +235,7 @@ cat("**Modules/traits with at least one FDR significant correlation (FDR p<0.05)
 simpHeat(t(filtadjCor),t(filtadjP),colorer(11))
 
 #second cleaned-up version for paper
-removevars=c(11,6,10,9,8)
+removevars=c(10,11,5,9,8,7)
 filtadjCorClean2=filtadjCor[,-removevars]
 filtadjPClean2=filtadjP[,-removevars]
 nonsigarows2=which(rowSums(filtadjPClean2)==0)
@@ -239,65 +244,110 @@ filtadjPClean2=filtadjPClean2[-nonsigarows2,]
 rownames(filtadjCorClean2)=gsub("ME","",rownames(filtadjCorClean2))
 rownames(filtadjPClean2)=rownames(filtadjCorClean2)
 
-simpHeat(t(filtadjCorClean2),t(filtadjPClean2),colorer(11))+scale_fill_gradientn(colors=colorer(11),breaks=c(-0.85,0,0.85),labels=c(-0.85,0,0.85),limits=c(-0.85,0.85))+scale_color_manual(values=c("black",NA),labels=c("FDR<0.05",""),name="Significance")
-ggsave(here("Plots","discovery_cleaned_metadata_heatmap_selected_variables.pdf"),,width = 15,height = 8)
+simpHeat(t(filtadjCorClean2),t(filtadjPClean2),colorer(11))+scale_fill_gradientn(colors=colorer(11),breaks=c(-1,0,1),labels=c(-1,0,1),limits=c(-1,1))+scale_color_manual(values=c("black",NA),labels=c("FDR<0.05",""),name="Significance")
+ggsave(here("Plots","discovery_cleaned_metadata_heatmap_selected_variables_crc_and_inflamed.pdf"),,width = 15,height = 8)
 
 pas=data.frame(padj)
 ps=data.frame(moduleTraitPvalue)
 cs=data.frame(moduleTraitCor)
 NANCY=data.frame(Module=rownames(cs),Cor=cs$NANCYscore,p=ps$NANCYscore,FDR=pas$NANCYscore)
 #write out list of modules  FDRsignificant with NANCY
-write.table(NANCY,here("Data","Generated","discovery_NANCY_module_correlations.tsv"),sep="\t",row.names = F)
+write.table(NANCY,here("Data","Generated","discovery_NANCY_module_correlations_crc_and_inflamed.tsv"),sep="\t",row.names = F)
 
 ```
 
 It is clear that the modules are largely correlating with differences in inflammation status. Especially given the FDR adjusted p-values. Nicely, the medication traits are showing opposing effects. The only traits with no nominally significant module associations were **`r names(nonsigcols)`**. The only modules with no significant associations were **`r names(nonsigrows)`**.
 
-## Module correlations with metadata within IBD patients only
+## Module correlations with metadata within inflammed IBD samples only
 
-As the controls introduce a distinct clustering, we aimed to see if the correlation with inflammation severity (NANCY) is maintained within IBD paitients alone.
+As the CRC controls introduce a distinct clustering of metadata such as age, we aimed to see if the correlation with inflammation severity (NANCY) is maintained within inflammed tissue from IBD paitients only.
 
 ```{r fig.width=10,fig.height=8, results='asis',echo=FALSE, include=T}
-#calculate MEs just for IBD patients
-IBDMEs = moduleEigengenes(tpm[traitData$Combined==1,], colors = bwModuleColors, excludeGrey = TRUE,)
-IBDMEs = IBDMEs$eigengenes
-colnames(IBDMEs)=gsub("ME","",colnames(IBDMEs))
-colnames(IBDMEs)=namekey[match(colnames(IBDMEs),namekey[,1]),2]
-
-write.csv(IBDMEs,here("Data","Generated","discovery_MEs_IBD_patients_only.csv"))
+#grab MEs just for IBD inflammed tissues
+IBDMEs = MEs[traitData$Combined==1&traitData$affected==1,]
 
 #correlate MEs vs numerical versions of traits
 #remove CRC and control vs ibd columns and CRC samples
-IBDnumTraitData = numTraitData[numTraitData$Combined==2,-c(14,17)]
-IBDmoduleTraitCor = cor(IBDMEs, IBDnumTraitData, use = "p")
-IBDmoduleTraitPvalue = corPvalueStudent(IBDmoduleTraitCor, nrow(IBDnumTraitData))
-IBDpadj=matrix(p.adjust(IBDmoduleTraitPvalue,method="fdr"),ncol=15,byrow = F)
-colnames(IBDpadj)=colnames(IBDnumTraitData)
-rownames(IBDpadj)=rownames(IBDmoduleTraitPvalue)
+IBDNancy = numTraitData[numTraitData$Combined==2,2]
+IBDmoduleTraitCor = cor(IBDMEs, IBDNancy, use = "p")
+IBDmoduleTraitPvalue = corPvalueStudent(IBDmoduleTraitCor, length(IBDNancy))
+IBDpadj=p.adjust(IBDmoduleTraitPvalue,method="fdr")
 #adjust p significant
-IBDnonsigarows=which(rowSums(IBDpadj<0.05)==0)
-IBDnonsigacols=which(colSums(IBDpadj<0.05)==0)
-IBDfiltadjCor=IBDmoduleTraitCor[-IBDnonsigarows,-IBDnonsigacols]
-IBDfiltadjP=IBDpadj[-IBDnonsigarows,-IBDnonsigacols]
+IBDsig=which(IBDpadj<0.05)
 
-colnames(IBDpadj)[-IBDnonsigacols]
 cat("FDR significant correlations only observed with NANCY score")
-kable(data.frame(Cor=IBDfiltadjCor,AdjP=IBDfiltadjP))
+sigdf=data.frame(Module=colnames(IBDMEs),Cor=IBDmoduleTraitCor,p=IBDpadj,AdjP=IBDpadj)[IBDsig,]
+kable(sigdf[order(sigdf[,2],decreasing = T),])
 
-#we have less power in this comparison due to the smaller sample size so also check to see if correlations in general match across the comparisons with IBD+CRC or with CRC only
-ibdnancycors = IBDmoduleTraitCor[,"NANCYscore"]
+#we have less power in this comparison due to the smaller sample size so also check to see if correlations in general match across the comparisons with IBD+CRC or with IBD only
+ibdnancycors = IBDmoduleTraitCor[,1]
 allnancycors = moduleTraitCor[,"NANCYscore"]
 ibdnancycors = ibdnancycors[names(allnancycors)]
 modcols = namekey[match(names(ibdnancycors),namekey[,2]),1]
 modnames = factor(names(ibdnancycors),levels=names(ibdnancycors))
-modsig = ifelse(modnames%in%names(IBDfiltadjP),23,NA)
-qplot(x=ibdnancycors,y=allnancycors)+geom_point(size=6,aes(fill=modnames),shape=modsig)+geom_point(size=5,aes(fill=modnames),shape=21)+xlab("Module Correlation with NANCY Score - IBD Patient Samples Only")+ylab("Module Correlation with NANCY Score - All Samples")+stat_cor()+scale_fill_manual(values=modcols)+labs(fill="Module")
+modsig = ifelse(modnames%in%sigdf$Module,23,NA)
+qplot(x=ibdnancycors,y=allnancycors)+geom_point(size=6,aes(fill=modnames),shape=modsig)+geom_point(size=5,aes(fill=modnames),shape=21)+xlab("Module Correlation with NANCY Score - Inflamed IBD Samples Only")+ylab("Module Correlation with NANCY Score - CRC and Inflamed IBD Samples")+stat_cor()+scale_fill_manual(values=modcols)+labs(fill="Module")
 
-ggsave(here("Plots","Module_NANCY_correlations_all_vs_IBD_only.pdf"),width=10,height=8,useDingbats=F)
+ggsave(here("Plots","Module_NANCY_correlations_CRC_and_inflamed_vs_inflamed_only.pdf"),width=10,height=8,useDingbats=F)
 
 ```
 
-In this smaller IBD only subset of the samples only the NANCY score retained FDR significant associations with 3 modules. But looking more broadly across modules we can see that, even without the control samples, the IBD patient expression of modules is correlated with NANCY score albeit with a lower magnitude correlation given the removal of the uninflammed controls.
+In this smaller inflamed IBD only subset of the samples the NANCY score retained FDR significant associations with several modules. But looking more broadly across modules we can see that, even without the control samples, the correlations with NANCY score are very consistent.
+
+## Paired analysis of matched unaffected tissues
+
+We also have unaffected tissue from some IBD patients. Comparison of modules significantly associated with NANCY to see if this a general feature of gene expression in IBD patients or a specific feature of inflammed tissue.
+
+```{r paired, include=T, fig.height=9, fig.width=10}
+#get patients with a pair of affected and unaffected samples
+ibdonly=traitData %>% rownames_to_column("Sample_ID") %>% filter(Combined==1)
+pairedsamps=table(ibdonly$affected,ibdonly$Patient_ID)
+pairedonly=ibdonly[ibdonly$Patient_ID%in%colnames(pairedsamps)[colSums(pairedsamps)==2],] %>% arrange(affected,Patient_ID)
+
+mesaff <- MEs[pairedonly$Sample_ID[pairedonly$affected==1],]
+mesun <- MEs[pairedonly$Sample_ID[pairedonly$affected==0],]
+
+module <- c()
+p <- c()
+plots <- list()
+for(i in 1:ncol(mesaff)){
+  tes <- t.test(mesaff[,i],mesun[,i],paired = T)
+  p <- c(p,tes$p.value)
+  df <- data.frame(Eigen=c(mesaff[,i],mesun[,i]),Aff=c(rep("Inflamed",nrow(mesaff)),rep("Uninflamed",nrow(mesaff))),Patient=c(1:nrow(mesaff)))
+  pl <- df %>% ggplot(aes(x=Aff,y=Eigen))+geom_violin(fill=namekey[which(namekey[,2]==colnames(mesaff)[i]),1])+geom_point()+geom_line(aes(group=Patient))+ylab(paste0(colnames(mesaff)[i]," Eigengene"))+theme(axis.title.x = element_blank())
+  plots[[colnames(mesaff)[i]]]=pl
+  module <- c(module,colnames(mesaff)[i])
+}
+
+adjp <- p.adjust(p,method="fdr")
+
+df <- data.frame(Module=module,p=p,adj.p=adjp) %>% arrange(adj.p)
+cat("*Modules different in paired analyses (FDR p<0.1)*")
+kable(df)
+
+df <- df %>% filter(adj.p<0.1)
+
+sigplots <- plots[df$Module]
+plot_grid(plotlist = sigplots)
+ggsave(here("Plots","paired_boxplots_ibd_inflamed_vs_non.pdf"),width=9,height=10,useDingbats=F)
+
+#plot difference between inflamed and uninflamed vs nancy correlation
+mesdiff <- mesaff-mesun
+meandiffs <- colMeans(mesdiff)
+nanccor <- moduleTraitCor[,"NANCYscore"]
+modcols <-  namekey[match(levels(as.factor(names(meandiffs))),namekey[,2]),1]
+plotdf <- data.frame(N=nanccor,D=meandiffs,Module=names(meandiffs))
+plotdf$modsig = ifelse(modnames%in%df$Module,23,NA)
+plotdf %>% ggplot(aes(y=N,x=D,fill=Module))+geom_point(size=6,aes(fill=Module),shape=plotdf$modsig)+stat_cor(aes(fill=NULL))+geom_point(size=5,shape=21)+xlab("Mean expression difference paired inflamed/uninflamed IBD samples")+ylab("Correlation with NANCY score across CRC and inflamed IBD samples")+scale_fill_manual(values=modcols)
+ggsave(here("Plots","scatterplot_NANCYcor_vs_MeanDiff_Paired_Samps.pdf"),width=9,height=10,useDingbats=F)
+```
+
+```{r, include=T, fig.width=8, fig.height=4}
+#also look at M6 in matched tissues
+m456plots <- plots[c("M4","M5","M6")]
+plot_grid(plotlist = m456plots, nrow=1)
+ggsave(here("Plots","paired_boxplots_m456.pdf"),width=9,height=10,useDingbats=F)
+```
 
 ```{r echo=FALSE}
 # Write Module Stats to Files
@@ -429,7 +479,7 @@ if(netplots==TRUE){
 
 *discovery_filtered_tpm.Rds* - The TPMs after filtering used to make the modules. Passed to the network script to name the genes.
 
-*discovery_NANCY_module_correlations.tsv* - Eigengene correlation values and significance for each module vs NANCY scores.
+*discovery_NANCY_module_correlations_crc_and_inflamed.tsv* - Eigengene correlation values and significance for each module vs NANCY scores.
 
 Additional plots not included in the markdown are network plots of the gene networks within each module, which are in Plots/Networks at various TOM thresholds.
 

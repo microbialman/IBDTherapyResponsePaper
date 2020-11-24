@@ -47,16 +47,16 @@ xcel=xCellAnalysis(t(rnadat),rnaseq = T, file.name =here("Data","Generated","dis
 #read in files
 xcellin=read_delim(here("Data","Generated","discovery_xCell_Scores.txt"),"\t") %>% t()
 MEs=read_delim(here("Data","Generated","discovery_MEs.csv"),",")
-meta=read_delim(here("Data","Input","discovery_metadata.csv.gz"),",") %>% filter(`sample_ID (patient)`%in%MEs$X1)
+meta=read_delim(here("Data","Input","discovery_metadata.csv.gz"),",") %>% filter(`sample_ID`%in%MEs$X1)
 
 xcel=xcellin
 colnames(xcel)=xcel[1,]
 xcel=xcel[-1,]
-xcel = xcel[match(meta$`sample_ID (patient)`,rownames(xcel)),]
+xcel = xcel[match(meta$sample_ID,rownames(xcel)),]
 rnames=rownames(xcel)
 xcel = apply(xcel,2,as.numeric)
 rownames(xcel)=rnames
-MEs = MEs %>% arrange(match(MEs$X1,meta$`sample_ID (patient)`))
+MEs = MEs %>% arrange(match(MEs$X1,meta$sample_ID))
 #just focus on celltypes in >25% of samples
 filtxcel=xcel[,-which(colSums(xcel==0)>(nrow(xcel)*0.75))]
 

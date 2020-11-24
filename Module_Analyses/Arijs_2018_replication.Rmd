@@ -8,8 +8,6 @@ chunk_output_type: console
 # Load in the replication data
 
 ```{r echo=FALSE, include=F}
-#load BioFunk
-source("~/devel/Useful_Scripts/BioFunk.R")
 library(here)
 #load WGCNA
 suppressPackageStartupMessages(library(WGCNA))
@@ -18,11 +16,14 @@ options(stringsAsFactors = FALSE)
 suppressPackageStartupMessages(library("GEOquery"))
 suppressPackageStartupMessages(library("affy"))
 library(knitr)
+library(cowplot)
 suppressPackageStartupMessages(library(ggbeeswarm))
 suppressPackageStartupMessages(library(ggpubr))
 set.seed(666)
 
 theme_set(theme_cowplot())
+
+source(here("Scripts","BioFunk.R"))
 
 #### commands used to generate the normalised data ####
 #getGEOSuppFiles("GSE73661")
@@ -175,6 +176,8 @@ This study had a complex set-up whereby patients were treat on different regimen
 plots=list()
 plotspair=list()
 ps=c()
+medresp=c()
+mednonresp=c()
 
 #get the color mapping from the name
 namekey=read.csv(here("Data","Input","module_number_key.csv.gz"),header=F)
@@ -186,13 +189,16 @@ for(i in 1:ncol(RepMEs)){
   regime=repmet$induction.therapy_maintenance.therapy.ch1
   colorname=namekey[namekey[,2]==mename,1]
   df=data.frame("Eigengene"=me,"Response"=groups,"Regimen"=regime)
-  pl=ggplot(df,aes(y=Eigengene,x=Regimen,fill=Response))+geom_boxplot()+geom_quasirandom()+
-    ylab(paste0(mename))+ggtitle(paste0(mename))+scale_fill_manual(values=c(colorname,"grey"))
+  pl=ggplot(df,aes(y=Eigengene,x=Response,fill=Response))+geom_violin()+geom_quasirandom()+
+    ylab(paste0(mename))+ggtitle(paste0(mename))+scale_fill_manual(values=c(colorname,"grey"))+
+    stat_summary(fun.y="median",geom="hpline")+stat_summary(fun.y="median",geom="hpline")+facet_grid(.~Regimen)
   plots[[mename]]=pl
-  plp=ggplot(df,aes(y=Eigengene,x=Regimen,fill=Response))+geom_boxplot()+geom_quasirandom()+
-    ylab(paste0(mename))+ggtitle(paste0(mename))+scale_fill_manual(values=c(colorname,"grey"))+stat_compare_means(method="wilcox")
+  plp=ggplot(df,aes(y=Eigengene,x=Response,fill=Response))+geom_violin()+geom_quasirandom()+
+    ylab(paste0(mename))+ggtitle(paste0(mename))+scale_fill_manual(values=c(colorname,"grey"))+stat_compare_means(method="wilcox")+stat_summary(fun.y="median",geom="hpline")+facet_grid(.~Regimen)
   plotspair[[mename]]=plp
   test=anova(lm(me~groups+regime))
+  medresp=c(medresp,median(me[groups==1]))
+  mednonresp=c(mednonresp,median(me[groups==0]))
   ps=c(ps,test$`Pr(>F)`[1])
 }
 
@@ -200,7 +206,7 @@ adjp=p.adjust(ps,method="fdr")
 siglist=plots[adjp<0.05]
 
 cat("**ANOVA results responders vs. non-responders split by (and adjusting for) different treatments**")
-psdf=data.frame("Module"=colnames(RepMEs),"ANOVA_p"=ps,"ANOVA_adj_p"=adjp)
+psdf=data.frame("Module"=colnames(RepMEs),"ANOVA_p"=ps,"ANOVA_adj_p"=adjp,"Median_Responders"=medresp,"Median_Non_Responders"=mednonresp)
 psdf=psdf[order(adjp),]
 kable(psdf)
 

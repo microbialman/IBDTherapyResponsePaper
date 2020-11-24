@@ -2,6 +2,7 @@
 title: "Gene-level prediction of response in the anti-TNF and corticosteroid datasets"
 output: html_document
 editor_options: 
+  chunk_output_type: inline
 chunk_output_type: console
 ---
 
@@ -108,12 +109,25 @@ ggsave(here("Plots","all_genes_auc_M4_M5_labelled.pdf"),height=10,width=10)
 
 ## Violin plot
 
-```{r violinplot,fig.height=5, fig.width=6}
+```{r violinplot,fig.height=10, fig.width=10}
 comb %<>% add_column(RankMod=ifelse(comb$ModuleA%in%c("M4","M5"),as.character(comb$ModuleA),"other")) %>% mutate(RankMod=factor(RankMod,levels=c("M5","M4","other")))
 ggplot(comb,aes(x=RankMod,y=RankSum,fill=RankMod))+geom_violin()+theme_classic()+ylab("AUC Rank Arjis + AUC Rank Haberman")+xlab("Gene Module Assignment")+
   scale_fill_manual(values=c("orange","paleturquoise","lightgrey"))+stat_compare_means(aes(x=RankMod),comparisons = list(c(2,3),c(1,3)))+guides(fill=F)
 ggsave(here("Plots","auc_rank_violinplot.pdf"),height = 10,width = 10)
 
+```
+``````{r violinplot_all,fig.height=5, fig.width=20}
+#read in the colors
+coldat=read.csv(here("Data","Input","module_number_key.csv.gz"),sep=",",header=F)
+
+combmeds <-  comb %>% filter(ModuleA!="unassigned") %>% group_by(ModuleA) %>% summarise(Meds=median(RankSum)) %>% arrange(Meds)
+comb %>% filter(ModuleA!="unassigned") %>% mutate(ModuleA=factor(ModuleA,levels=combmeds$ModuleA)) %>% ggplot(aes(x=ModuleA,y=RankSum,fill=ModuleA))+geom_violin()+geom_quasirandom(alpha=0.1)+theme_classic()+ylab("AUC Rank Arjis + AUC Rank Haberman")+xlab("Gene Module Assignment")+guides(fill=F)+stat_summary(fun.y="median",geom="hpline")+
+  scale_fill_manual(values=coldat[match(combmeds$ModuleA,coldat[,2]),1])
+ggsave(here("Plots","auc_rank_violinplot_all.pdf"),height = 5,width = 20)
+
+comb %>% filter(ModuleA!="unassigned") %>% mutate(ModuleA=factor(ModuleA,levels=combmeds$ModuleA)) %>% ggplot(aes(x=ModuleA,y=RankSum,fill=ModuleA))+geom_boxplot()+geom_quasirandom(alpha=0.1)+theme_classic()+ylab("AUC Rank Arjis + AUC Rank Haberman")+xlab("Gene Module Assignment")+guides(fill=F)+
+  scale_fill_manual(values=coldat[match(combmeds$ModuleA,coldat[,2]),1])
+ggsave(here("Plots","auc_rank_boxplot_all.pdf"),height = 5,width = 20)
 ```
 
 

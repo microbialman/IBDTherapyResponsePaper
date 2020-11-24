@@ -1,0 +1,268 @@
+---
+title: "Histological feature analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(here)
+library(magrittr)
+library(tidyverse)
+library(ggplot2)
+library(RColorBrewer)
+library(psych)
+library(corrplot)
+library(GGally)
+library(ggpubr)
+library(pheatmap)
+library(gridExtra)
+library(WGCNA)
+library(knitr)
+library(ggbeeswarm)
+#load BioFunk helper script
+source(here("Scripts","BioFunk.R"))
+colorer=colorRampPalette(rev(brewer.pal(11,"RdBu")))
+theme_set(theme_cowplot())
+```
+
+As the modules were highly correlated with specific cell-type scores in the deconvolution and single-cell analyses, we scored disease relevant features in histological sections to determine if these produced the shift in cell type composition.
+
+# Correlation between histological features
+
+```{r between_feat, fig.width=10, fig.height=10}
+set.seed(100)
+#read in the scores of features, normalised by no of cells within features/total number of cells in slide
+#remove redundant/non-feature scores
+featscores <- read_delim(here("Data","Input","histology_features.csv.gz"),delim=",") %>% dplyr::select(-LO_plasma,-inflamed)
+#remove features observed in <10 samples
+featscores <- featscores %>% dplyr::select(which(colSums(!is.na(featscores))>10)) %>% mutate(Sample_name= paste0("S",as.character(.$Sample_name)))
+ggpairs(featscores[,-1])
+ggsave(here("Plots","histology_pairwise_corr.pdf"),width = 10,height = 10, useDingbats=F)
+
+panel.plot <- function(x, y) {
+    usr <- par("usr"); on.exit(par(usr))
+    par(usr = c(0, 1, 0, 1))
+    ct <- cor.test(x,y)
+    sig <- symnum(ct$p.value, corr = FALSE, na = FALSE,
+                  cutpoints = c(0, 0.001, 0.01, 0.05, 0.1, 1),
+                  symbols = c("***", "**", "*", ".", " "))
+    r <- ct$estimate
+    rt <- format(r, digits=2)[1]
+    cex <- 0.5/strwidth(rt)
+
+    text(.5, .5, rt, cex=cex * abs(r))
+    text(.8, .8, sig, cex=cex, col='blue')
+}
+panel.smooth <- function (x, y) {
+      points(x, y)
+      abline(lm(y~x), col="red")
+      lines(stats::lowess(y~x), col="blue")
+}
+pdf(here("Plots","pairwise_histology_scatter.pdf"))
+scatters <- pairs(featscores[,-1],upper.panel = NULL)
+dev.off()
+
+betcors <- corr.test(featscores[,-1],use="pairwise",adjust = "none")
+
+pdf(here("Plots","pairwise_histology_corrplot.pdf"))
+corrplot(betcors$r,type = "lower",outline = T, method = "color", p.mat = betcors$p, insig="label_sig", tl.col="black", col=colorer(11))
+dev.off()
+```
+
+# Correlations between histological features and module eignegenes
+
+Heatmap showing only modules and features that had at least one nominally significant correlation. Nominal significance shown by borders, FDR significance by dots.
+
+```{r feat_mod_heat, fig.width=8,fig.height=3}
+#read in the eigengenes for IBD patients tissue samples
+eigen <- read.csv(here("Data","Generated","discovery_MEs.csv"),row.names=1)
+meta <- read.csv(here("Data","Input","discovery_metadata.csv.gz")) %>% filter(disease!="A") %>% filter(sample_ID%in%rownames(eigen))
+ibdeigen <- eigen[as.character(meta$sample_ID),]
+
+
+#match to histology
+rownames(ibdeigen) <- paste0("S",rownames(ibdeigen))
+featsub <- featscores %>% filter(Sample_name%in%rownames(ibdeigen))
+ibdeigen <- ibdeigen[featsub$Sample_name,]
+
+#calculate correlation, remove granuloma (not enough obs for corr)
+corrs <- corr.test(featsub[,-c(1,5)],ibdeigen,use = "pairwise", adjust = "none")
+corrsfdr <- corr.test(featsub[,-c(1,5)],ibdeigen,use = "pairwise", adjust="fdr")
+
+cord <- corrs$r
+sigp <- corrs$p
+fdrp <- corrsfdr$p
+
+sigp <- ifelse(sigp<0.05,1,0)
+fdrp <- ifelse(fdrp<0.05,1,0)
+
+#remove no sig corrs
+remcol <- which(colSums(sigp==1)==0)
+cord <- cord[,-remcol]
+sigp <- sigp[,-remcol]
+fdrp <- fdrp[,-remcol]
+
+#plot with nominal ps
+simpHeatNomFdr(cord,sigp,fdrp,colorer(100))
+ggsave(here("Plots","eigen_histology_heat.pdf"),width = 8, height = 3,  useDingbats=F)
+```
+
+# Scatter plots of histology vs modules
+
+Focusing on M4 and M6 as they had FDR significant associations and M5 due to previous findings.
+Ulceration, lymphoid_agg, and cryptitis as these were the features most highly assocaited with these modules.
+
+```{r corrplots, fig.width=10, fig.height=10}
+
+#merge eigengenes and features
+merged <- cbind(featsub,ibdeigen) %>% dplyr::select("Sample_name","lymphoid_agg","cryptitis","ulceration","M4","M5","M6")
+mlong <- merged %>% pivot_longer(cols=starts_with("M"), names_to = "Module", values_to = "Eigengene")
+molong <- mlong %>% pivot_longer(cols=c("lymphoid_agg","cryptitis","ulceration"),names_to = "Feature",values_to="Feature_Value") %>% filter(!is.na(Feature_Value))
+
+molong %>% ggplot(aes(x=Eigengene,y=Feature_Value,color=Module))+geom_smooth(method="lm")+geom_point(col="black",size=1.5)+geom_point()+facet_wrap(Module~Feature, scales = "free")+
+  scale_color_manual(values=c("paleturquoise","orange","blue"))+guides(color=F)+stat_cor(col="black")
+ggsave(here("Plots","scatter_m456_histology.pdf"),width=10,height=10,useDingbats=F)
+
+```
+
+M5 and M6 continuous correlation with cryptitis and lymphoid_agg respectively, M4 correlates with ulceration but exponentially where we see a binary grouping with a small number of highly ulcerated samples that have high M4 expression.
+
+# Classifying patients based on eigengene expression to confirm hsitological features
+
+Based on these results we aimed to classify patients by their M4, M5, M6 expression in their inflamed tissue to see if the tissue structures within these samples reflects the observations from the targeted scoring.
+
+```{r clust, fig.height=4, fig.width=6}
+#read in the eigengenes for inflammed tissue from the IBD patients
+eigen <- read.csv(here("Data","Generated","discovery_MEs.csv"),row.names=1)
+meta <- read.csv(here("Data","Input","discovery_metadata.csv.gz")) %>% filter(affected=="B")
+patients <- table(meta$Patient_ID)[which(table(meta$Patient_ID)==1)]
+meta <- meta %>% filter(Patient_ID%in%names(patients)) %>% filter(sample_ID%in%rownames(eigen))
+
+infleigen <- eigen[as.character(meta$sample_ID),]
+rownames(infleigen) <- paste0("S",meta$sample_ID)
+m456 <- infleigen %>% dplyr::select(M4,M5,M6)
+
+dis <- dist(m456, method = "euclidean")
+hc <- hclust(dis, method = "complete")
+#plot heirarhical clustering can see three clear groupings
+groups=cutree(hc,k = 4)
+plot(hc,labels=groups)
+
+
+```
+
+```{r clust_heat, fig.width=6, fig.height=7}
+group_labs <- data.frame(Label=c("M4/M5 High","M6 High","All Low","M5 High"),Group=c(4,1,3,2))
+row_labs <- data.frame(group_labs[match(groups,group_labs[,2]),1])
+rownames(row_labs) <- names(groups)
+colnames(row_labs) <- "M4,5,6 Cluster"
+
+phplot <- pheatmap(m456,cutree_rows = 4, annotation_row = data.frame(row_labs), annotation_names_row = F, clustering_distance_rows = "euclidean", clustering_method = "complete")
+
+pdf(here("Plots","m456_cluster_heat.pdf"),width=6, height=7, useDingbats=F)
+grid::grid.newpage()
+grid::grid.draw(phplot$gtable)
+dev.off()
+
+perc <- (length(which(row_labs[,1]=="M4/M5 High"))/nrow(row_labs))*100
+
+```
+
+Seperate clustering of moderate to high M6 and very M4/5 high expression. In the discovery cohort **`r round(perc)`**% of samples were M4/M5 high. This is reflected in the scatter plot of eigengenes below:
+
+```{r m456, fig.height=5, fig.width=7}
+# Plot the elbow plot
+m456 %>% ggplot(aes(x=M4,y=M5,col=M6))+geom_point(size=3, alpha=0.8)+scale_color_viridis_c()
+ggsave(here("Plots","m45_scatter_by_m6.pdf"),width=7,height=5,useDingbats=F)
+```
+
+# Investigation of M4,5,6 clusters in the RISK cohort
+
+Of the tissues in the resection cohort, **`r round(perc)`**% were M4/5 high. We wanted to see how many are similarly high in a treatement naive, early onset cohort - RISK.
+
+```{r risk, fig.width=9, fig.height=6}
+#read in RISK data without corrupt gene symblols
+risknames <- read.table(here("Data","Input","GSE57945_RAW_Merged.tsv.gz"),sep="\t",header = T, row.names = 1)
+#read in RISK rpkm data
+risk <- read.table(here("Data","Input","GSE57945_all_samples_RPKM.txt.gz"),sep="\t",header=T, row.names=1)
+risk <- risk[,-1]
+fpkmToTpm <- function(fpkm) {
+exp(log(fpkm) - log(sum(fpkm)) + log(1e6))
+}
+risk <- apply(risk,2,fpkmToTpm)
+riskg <- data.frame(risk)
+riskg$Gene.Symbol <- risknames$Gene.Symbol
+riskg <- riskg %>% group_by(Gene.Symbol) %>% summarise_all(sum) %>% data.frame()
+rownames(riskg) <- riskg$Gene.Symbol
+riskg <- riskg[,-(which(colnames(riskg)=="Gene.Symbol"))]
+#seemed like there were clear outliers in analyses, check in pca
+pcs <- prcomp(t(riskg))
+ppl <- data.frame(pcs$x)
+ggplot(ppl,aes(x=PC1,y=PC2))+geom_point()+geom_hline(yintercept = -15000)
+#distinct outliers, remove
+riskg <- riskg[,-which(pcs$x[,2]< -15000)]
+pcs <- prcomp(t(riskg))
+ppl <- data.frame(pcs$x)
+ggplot(ppl,aes(x=PC1,y=PC2))+geom_point()
+
+modinfo <- read.csv(here("Data","Generated","discovery_WGCNAgeneInfo.csv")) %>% dplyr::filter(moduleColor%in%c("M4","M5","M6"))
+riskg <- riskg[which(rownames(riskg)%in%modinfo$geneName),]
+
+cat("*n Genes in modules as defined in discovery cohort*")
+kable(table(as.character(modinfo$moduleColor)))
+
+modinfo <- modinfo[match(rownames(riskg),modinfo$geneName),]
+cat("*n Genes in modules detected in RISK cohort*")
+kable(table(as.character(modinfo$moduleColor)))
+
+
+
+#generate eigen genes
+riskme <- moduleEigengenes(t(riskg),as.character(modinfo$moduleColor))
+rmes <- riskme$eigengenes
+colnames(rmes) <- gsub("ME","",colnames(rmes))
+
+
+#metadata
+library("GEOquery")
+riskm <- getGEO(filename = here("Data","Input","GSE57945_series_matrix.txt.gz"))
+rtab <- data.frame(riskm) %>% filter(diagnosis.ch1%in%c("CD","UC"))
+risklong <- rmes %>% rownames_to_column("Sample") %>% pivot_longer(cols=starts_with("M"),names_to="Module")
+risklong$Deep_Ulceration <- rtab$deep.ulcer.ch1[match(risklong$Sample,rtab$description)]
+risklong$Deep_Ulceration[risklong$Deep_Ulceration=="no"]="No"
+risklong <- risklong %>% filter(Deep_Ulceration!="NA")
+risklong %>% ggplot(aes(x=Deep_Ulceration,y=value,fill=Deep_Ulceration))+
+  geom_violin()+geom_quasirandom(alpha=0.5)+facet_wrap(.~Module,scales="free")+stat_compare_means(label.y.npc = 0.9)+
+  scale_fill_manual(values=c("white","red"))+stat_summary(fun.y="median",geom="hpline")
+ggsave(here("Plots","risk_ulceration_boxplots.pdf"),width=9, height=6, useDingbats=F)
+```
+
+```{r risk_clus, fig.height=8, fig.width=5}
+
+#filter rmes to just UC and CD
+rmes <- rmes[which(rownames(rmes)%in%rtab$description),]
+
+#do clustering as before but on risk
+dis <- dist(rmes, method = "euclidean")
+hc <- hclust(dis, method = "complete")
+#plot heirarhical clustering can see three clear groupings
+groups=cutree(hc, k = 4)
+plot(hc,labels=groups)
+
+annrow <- data.frame("Group"=ifelse(groups==1,"M4/5 Low","M4/5 High"))
+
+#need to limit coloring on heatmap as an outlier washes out all differences
+breaklist <- seq(min(rmes),0.3,length.out = 100)
+
+phplot <- pheatmap(rmes,annotation_names_row = F, show_rownames = F,  clustering_distance_rows = "euclidean", clustering_method = "complete", annotation_row = annrow, color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYlBu")))(length(breaklist)), breaks= breaklist)
+
+pdf(here("Plots","m456_cluster_heat_RISK.pdf"),width=5, height=8, useDingbats=F)
+grid::grid.newpage()
+grid::grid.draw(phplot$gtable)
+dev.off()
+
+
+riskper <- (length(which(annrow$Group=="M4/5 High"))/length(annrow$Group))*100
+```
+
+In the RISK cohort there was significantly less M6 expression and **`r round(riskper)`**% of samples were M4/5 high.

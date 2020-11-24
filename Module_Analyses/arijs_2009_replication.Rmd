@@ -8,8 +8,6 @@ chunk_output_type: console
 # Load in the replication data
 
 ```{r echo=FALSE}
-#load BioFunk
-source("~/devel/Useful_Scripts/BioFunk.R")
 #load WGCNA
 suppressPackageStartupMessages(library(WGCNA))
 allowWGCNAThreads()
@@ -23,6 +21,8 @@ library(knitr)
 library(cowplot)
 set.seed(666)
 theme_set(theme_cowplot())
+#load BioFunk
+source(here("Scripts","BioFunk.R"))
 
 #### the below commands were originally used to generate the normalised data ####
 
@@ -164,16 +164,21 @@ write.csv(writeMEs,here("Data","Generated","Arijs_2009_pre_treat_MEs.csv"))
 
 preplots=list()
 ps=c()
+medresp=c()
+mednonresp=c()
 for(i in 1:ncol(preMEs)){
   me=preMEs[,i]
   mename=colnames(preMEs)[i]
   groups=preMeta$aTNF_Response
   colorname=namekey[namekey[,2]==mename,1]
   df=data.frame("Eigengene"=me,"Response"=groups)
-  pl=ggplot(df,aes(x=Response,y=Eigengene,fill=colorname))+geom_boxplot()+geom_quasirandom()+
-    ylab(paste0(mename))+scale_fill_manual(values=colorname)+guides(fill=F)
+  pl=ggplot(df,aes(x=Response,y=Eigengene,fill=colorname))+geom_violin()+geom_quasirandom()+
+    ylab(paste0(mename))+scale_fill_manual(values=colorname)+guides(fill=F)+
+    stat_summary(fun.y="median",geom="hpline")
   preplots[[mename]]=pl
   test=wilcox.test(me~groups)
+  medresp=c(medresp,median(me[groups=="Yes"]))
+  mednonresp=c(mednonresp,median(me[groups=="No"]))
   ps=c(ps,test$p.value)
 }
 
@@ -181,7 +186,7 @@ adjp=p.adjust(ps,method="fdr")
 siglist=preplots[adjp<0.05]
 
 cat("**Wilcox results responders vs. non-responders pre-treatment**")
-psdf=data.frame("Module"=colnames(preMEs),"Wilcox_p"=ps,"Wilcox_FDR_p"=adjp)
+psdf=data.frame("Module"=colnames(preMEs),"Wilcox_p"=ps,"Wilcox_FDR_p"=adjp,"Median_Responders"=medresp,"Median_Non_Responders"=mednonresp)
 psdf=psdf[order(adjp),]
 kable(psdf)
 

@@ -5,6 +5,8 @@ suppressPackageStartupMessages(library(reshape2))
 suppressPackageStartupMessages(library(RColorBrewer))
 suppressPackageStartupMessages(library(DESeq2))
 suppressPackageStartupMessages(library(snow))
+#devtools::install_github("wilkelab/ungeviz")
+suppressPackageStartupMessages(library(ungeviz))
 #script containing various helper functions
 
 #return row max of dataframe
@@ -137,6 +139,31 @@ simpHeat=function(cordat,pdat,pal){
       scale_fill_gradientn(colors=pal)+scale_color_manual(values=c("black",NA),labels=NULL,guide=F)
 }
 
+#function to plot simple heatmaps from correlation matrices, with 2 levels of p sig
+simpHeatNomFdr=function(cordat,pdat,fdrdat,pal){
+  roword=hclust(dist(cordat))
+  colord=hclust(dist(t(cordat)))
+  cordat=cordat[roword$order,colord$order]
+  pdat=pdat[roword$order,colord$order]
+  fdrdat=fdrdat[roword$order,colord$order]
+  melt=melt(cordat)
+  pmelt=melt(pdat)
+  fmelt=melt(fdrdat)
+  pmelt$value[pmelt$value==0]=NA
+  fmelt$value[fmelt$value==0]=NA
+  colnames(melt)=c("Var1","Var2","Correlation")
+  ggplot(melt,aes(x=Var2,y=Var1,fill=Correlation))+geom_tile()+
+    geom_rect(data=pmelt, size=0.5, fill=NA, aes(col=as.factor(pmelt$value), xmin=as.numeric(pmelt$Var2)-0.5,xmax=as.numeric(pmelt$Var2)+0.5,
+                                                 ymin=as.numeric(pmelt$Var1)-0.5,ymax=as.numeric(pmelt$Var1)+0.5))+
+    geom_point(data=fmelt, size=2, fill=NA, aes(col=as.factor(fmelt$value), xmin=as.numeric(fmelt$Var2)-0.5,xmax=as.numeric(fmelt$Var2)+0.5,
+                                                 ymin=as.numeric(fmelt$Var1)-0.5,ymax=as.numeric(fmelt$Var1)+0.5))+
+    theme(axis.title = element_blank(),
+          axis.line = element_blank(),
+          axis.ticks = element_blank(),
+          axis.text.x = element_text(angle = 90,hjust=1,vjust=0.5))+
+    scale_fill_gradientn(colors=pal)+scale_color_manual(values=c("black",NA),labels=NULL,guide=F)
+}
+
 #function that performs DESeq2 LRT Multiple comparisons from raw counts, assuming a single grouping with no covariates
 #returns number of signficant results as specified, ordered by p-val
 DESeqLrt=function(counts,groups,nres){
@@ -163,43 +190,6 @@ multiAnova=function(counts,groups,nres){
   res=data.frame(Variable=names(res),p=res,check.names = F)
   return(res[1:nres,])
 }
-
-#function to calculate IgA seq index from two vectors of abundances (IgA+ and IgA-)
-igaSeqIndex=function(pos,neg,pseudo){
-  p=pos+pseudo
-  n=neg+pseudo
-  pl=log(p)
-  nl=log(n)
-  num=pl-nl
-  den=pl+nl
-  igaindex=-1*(num/den)
-  return(igaindex)
-}
-
-#function to calculate IgA cond probability from abundance vectors and fractions
-igaCondProb=function(binabund,totabund,binfrac){
-  likeli=binabund
-  prior=binfrac
-  post=likeli*prior
-  evidence=ifelse(post>totabund,post,totabund)
-  if(post==0&&evidence==0){
-    return(NA)
-  }
-  else{
-  return(post/evidence)
-  }    
-}
-
-#function to calculate posterior ratio for IgA seq
-igaBayesRatio=function(posabund,negabund,posfrac,negfrac,pseudo){
-  pa=posabund+pseudo
-  na=negabund+pseudo
-  pf=posfrac
-  nf=negfrac
-  rp=(pa/na)*(pf/nf)
-  return(rp)
-}
-
 
 
 
