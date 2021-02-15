@@ -18,11 +18,8 @@ nreplicates=3
 # exclude samples from analysis.
 exclude <- c(
     "Unstimulated_3",
-    "OSM_6",
     "IL1beta_6",
     "TNF_6",
-    "IL1betaOSM_4",
-    "OSMTNF_1",
     "IL1betaTNF_6"
 )
 
@@ -32,26 +29,11 @@ fit_type <- "local"
 experimental_design <- "~experiment_group"
 reference_levels <- list(treatment = "Unstimulated", replicate = 1)
 contrasts <- list(
-    "IL1betaOSM_vsIL1betaTNF" = c("experiment_group","IL1betaOSM", "IL1betaTNF"),
-    "IL1betaOSM_vsOSMTNF" = c("experiment_group","IL1betaOSM", "OSMTNF"),
-    "IL1betaOSM_vsIL1beta" = c("experiment_group","IL1betaOSM", "IL1beta"),
-    "IL1betaOSM_vsOSM" = c("experiment_group","IL1betaOSM", "OSM"),
-    "IL1betaOSM_vsTNF" = c("experiment_group","IL1betaOSM", "TNF"),
-    "IL1betaOSM_vsUnstimulated" = c("experiment_group","IL1betaOSM", "Unstimulated"),
-    "IL1betaTNF_vsOSMTNF" = c("experiment_group","IL1betaTNF", "OSMTNF"),
     "IL1betaTNF_vsIL1beta" = c("experiment_group","IL1betaTNF", "IL1beta"),
-    "IL1betaTNF_vsOSM" = c("experiment_group","IL1betaTNF", "OSM"),
     "IL1betaTNF_vsTNF" = c("experiment_group","IL1betaTNF", "TNF"),
     "IL1betaTNF_vsUnstimulated" = c("experiment_group","IL1betaTNF", "Unstimulated"),
-    "OSMTNF_vsIL1beta" = c("experiment_group","OSMTNF", "IL1beta"),
-    "OSMTNF_vsOSM" = c("experiment_group","OSMTNF", "OSM"),
-    "OSMTNF_vsTNF" = c("experiment_group","OSMTNF", "TNF"),
-    "OSMTNF_vsUnstimulated" = c("experiment_group","OSMTNF", "Unstimulated"),
-    "IL1beta_vsOSM" = c("experiment_group","IL1beta", "OSM"),
     "IL1beta_vsTNF" = c("experiment_group","IL1beta", "TNF"),
     "IL1beta_vsUnstimulated" = c("experiment_group","IL1beta", "Unstimulated"),
-    "OSM_vsTNF" = c("experiment_group","OSM", "TNF"),
-    "OSM_vsUnstimulated" = c("experiment_group","OSM", "Unstimulated"),
     "TNF_vsUnstimulated" = c("experiment_group","TNF", "Unstimulated")
 )
 
