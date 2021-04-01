@@ -223,6 +223,9 @@ cat("**Pairwise test for M5 only for paper**")
 plot(plotspair$M5)
 ggsave(here("Plots","Arijs_M5_pairwise.pdf"),width=12,height =8)
 
+cat("**Larger plot of M4 for comparison**")
+plot(plotspair$M4)
+ggsave(here("Plots","Arijs_M4_pairwise.pdf"),width=12,height =8)
 ```
 
 # For regimens that were significant, differences in M4 and M5 effect sizes by response

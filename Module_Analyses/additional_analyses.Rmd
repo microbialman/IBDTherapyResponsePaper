@@ -1,0 +1,188 @@
+---
+title: "Additional Analyses"
+output:
+  html_document: default
+  pdf_document: default
+editor_options: 
+  chunk_output_type: inline
+---
+
+Some additional analyses to address reviewer comments.
+
+```{r echo=FALSE}
+#library here lets things be relative to this repo
+library(here)
+#load BioFunk helper script
+source(here("Scripts","BioFunk.R"))
+
+#load other libraries
+library(ggpubr)
+library(tidyverse)
+library(caret)
+library(pROC)
+library(edgeR)
+library(ggvenn)
+library(xCell)
+
+#load WGCNA
+suppressPackageStartupMessages(library(WGCNA))
+options(stringsAsFactors = FALSE)
+allowWGCNAThreads(nThreads = 20)
+#set seed to make reproducible
+set.seed(666)
+
+theme_set(theme_cowplot())
+```
+
+# ROC Curves for predicting repsonse for M4 and M5 eigengenes
+
+Carry out ROC curves at the eigengene level for M4 and M5.
+
+## aTNF
+
+```{r atnfroc, fig.height=4, fig.width=5}
+#load the eigengenes for the aTNF study
+atnfeig <- read.csv(here("Data","Generated","Arijs_2009_pre_treat_MEs.csv")) %>% select(c("M4","M5","Response"))
+atnfeig$Response[atnfeig$Response=="Non-Responder"]="Non.Responder"
+#run caret to find predictive ability for each module
+control <- trainControl(method = "repeatedcv", number = 5, repeats = 10, summaryFunction = twoClassSummary, classProbs = TRUE)
+set.seed(123)
+reslist <- list()
+for(i in 1:(ncol(atnfeig)-1)){
+df <- data.frame(Module=atnfeig[,i],Response=atnfeig$Response)
+fit <- train(Response ~ Module, data = df, method = "glm", 
+             family = "binomial", trControl = control)
+r <- fit$results$ROC
+p <- predict(fit, df, type="prob")
+rp <- roc(df$Response, p$Responder)
+reslist[[i]] <- rp
+}
+
+plot(reslist[[1]],col="paleturquoise",main="Pre-treatment M4 eigengene\naTNF Response (Arijs 2009)")
+text(x = 1, paste0("AUC:", round(reslist[[1]]$auc,2)))
+
+
+
+plot(reslist[[2]],col="orange",main="Pre-treatment M5 eigengene\naTNF Response (Arijs 2009)")
+text(x = 1, paste0("AUC:", round(reslist[[2]]$auc,2)))
+
+```
+
+## Corticosteroids
+
+```{r cortroc, fig.height=4, fig.width=5}
+#load the eigengenes for the cort study
+corteig <- read.csv(here("Data","Generated","Haberman_pre_treat_corticosteroid_MEs.csv")) %>% select(c("M4","M5","Response"))
+corteig$Response[corteig$Response=="Non-Responder"]="Non.Responder"
+
+reslist <- list()
+for(i in 1:(ncol(corteig)-1)){
+df <- data.frame(Module=corteig[,i],Response=corteig$Response)
+fit <- train(Response ~ Module, data = df, method = "glm", 
+             family = "binomial", trControl = control)
+r <- fit$results$ROC
+p <- predict(fit, df, type="prob")
+rp <- roc(df$Response, p$Responder)
+reslist[[i]] <- rp
+}
+
+plot(reslist[[1]],col="paleturquoise",main="Pre-treatment M4 eigengene\nCorticosteroid Response (Haberman 2019)")
+text(x = 1, paste0("AUC:", round(reslist[[1]]$auc,3)))
+
+plot(reslist[[2]],col="orange",main="Pre-treatment M5 eigengene\nCorticosteroid Response (Haberman 2019)")
+text(x = 1, paste0("AUC:", round(reslist[[2]]$auc,3)))
+
+```
+
+# DE Genes Responders vs HC as predictors of response 
+
+Do genes that differ in reponsive disease also predict response. i.e. Are the genes that are different in responders compared to healthy controls the same as those that differ between responders and non-responders, just to a different extent.
+
+```{r, fig.width=8, fig.height=5}
+#load in the gene counts
+genes <- read.table(here("Data","Input","Arijs_2009_cleaned_expr_dat.tsv.gz"),sep="\t",header=T)
+meta <- read.table(here("Data","Input","Arijs_2009_cleaned_meta_table.tsv.gz"),sep="\t",header=T)
+
+#do responders pre-treatment vs hc
+hcm <- meta %>% filter(Control==1|PostTreatment==0) %>% filter(is.na(.$aTNF_Response)|aTNF_Response==1) %>% filter(Tissue==1)
+hgen <- genes[,hcm$GID]
+
+#model matrix
+mm <- model.matrix(~0+Control+IBD_Combined,data = hcm)
+fit <- lmFit(hgen,mm)
+cont.matrix <- makeContrasts(IBDvsHC=IBD_Combined-Control, levels=mm)
+fit2 <- contrasts.fit(fit, cont.matrix)
+fit2 <- eBayes(fit2)
+hcres <- topTable(fit2, adjust="BH", number = Inf)
+
+top50 <- hcres %>% rownames_to_column() %>% arrange(desc(logFC)) %>% slice(1:50)
+
+#do responders vs non-responders
+respm <- meta %>% filter(Control==0&PostTreatment==0) %>% filter(Tissue==1)
+respm$Responder <- ifelse(respm$aTNF_Response==1,1,0)
+respm$NonResponder <- ifelse(respm$aTNF_Response==1,0,1)
+resgen <- genes[,respm$GID]
+
+#model matrix
+rmm <- model.matrix(~0+Responder+NonResponder,data = respm)
+rfit <- lmFit(resgen,rmm)
+rcont.matrix <- makeContrasts(NonRespvsResp=NonResponder-Responder, levels=rmm)
+rfit2 <- contrasts.fit(rfit, rcont.matrix)
+rfit2 <- eBayes(rfit2)
+respres <- topTable(rfit2, adjust="BH", number = Inf)
+
+
+#get module list
+modlist <- read_delim(here("Data/Generated/discovery_WGCNAgeneInfo.csv"),delim=",")
+
+#merge results
+rmatched <- respres[rownames(hcres),]
+colnames(rmatched) <- paste0("resp_",colnames(rmatched))
+merged <- cbind(rmatched,hcres) %>% data.frame()
+rownames(merged) <- rownames(rmatched)
+merged$Module <- modlist$moduleColor[match(rownames(merged),modlist$geneid)]
+merged <- merged %>% filter(.$resp_adj.P.Val<0.05|.$adj.P.Val<0.05)
+merged$Color <- ifelse(merged$Module%in%c("M4","M5"), merged$Module, "Other")
+merged$T50 <- ifelse(merged$logFC>=min(top50$logFC),"Top50",NA)
+
+scatter <- ggplot(merged,aes(x=resp_logFC,y=logFC,color=Color))+geom_point(aes(color=T50),size=2)+geom_point()+scale_color_manual(values=c("orange","paleturquoise","grey","red"))+xlab("LogFC Responders vs Non-Responders")+ylab("LogFC IBD Responders vs HC")
+
+m4list <- which(merged$Module=="M4")
+m5list <- which(merged$Module=="M5")
+t50list <- which(merged$T50=="Top50")
+
+ven <- ggvenn(list(M4=m4list,M5=m5list,Top50=t50list),fill_color = c("paleturquoise","orange","red"), show_percentage = F)
+
+plot_grid(scatter,ven,nrow=1,rel_widths = c(0.7,0.3))
+
+```
+
+# xCell on prospective anti-TNF cohort
+
+```{r xcell, fig.width=5, fig.height=4}
+#give gene symbols#load in the gene counts
+genes <- read.table(here("Data","Input","Arijs_2009_cleaned_expr_dat.tsv.gz"),sep="\t",header=T)
+meta <- read.table(here("Data","Input","Arijs_2009_cleaned_meta_table.tsv.gz"),sep="\t",header=T)
+
+#gene gene symbols
+genes <- read.table(here("Data","Input","Arijs_2009_cleaned_expr_dat.tsv.gz"),sep="\t",header=T)
+meta <- read.table(here("Data","Input","Arijs_2009_cleaned_meta_table.tsv.gz"),sep="\t",header=T)
+genes$Symbol <- modlist$geneName[match(rownames(genes),modlist$geneid)]
+genes <- genes %>% filter(!is.na(Symbol)) %>% group_by(Symbol) %>% summarise_all(sum)
+gdf <- genes %>% data.frame()
+rownames(gdf) <- gdf$Symbol
+gdf <- gdf %>% select(-1)
+
+#run xcell
+xc <- xCellAnalysis(gdf)
+neut <- xc["Neutrophils",]
+
+meta$Neutrophils <- neut
+
+pret <- meta %>% filter(Control==0,PostTreatment==0)
+pret$aTNF_Response <- ifelse(pret$aTNF_Response==1,"Responder","Non-Responder")
+
+pret %>% ggplot(aes(x=as.factor(aTNF_Response),y=Neutrophils))+geom_boxplot()+geom_point()+xlab("anti-TNF Response (Arijs 2009)")+
+  ylab("xCell Predicted Neutrophil Score\n(Pre-treatment)")+stat_compare_means(label.x.npc = 0.9, comparisons = list(c(1,2)), method = "t.test")
+```
+
